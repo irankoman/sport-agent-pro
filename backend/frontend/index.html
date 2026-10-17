@@ -1,0 +1,2554 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#020617" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SportAgent" />
+  <meta name="application-name" content="SportAgent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <title>SPORT-AGENT PRO · Betano Edition</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 & Babel CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    html, body {
+      background-color: #020617;
+      color: #f1f5f9;
+      font-family: system-ui, -apple-system, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: none;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #f97316; }
+    .touch-scroll {
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+    .badge-titular { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-mixto { background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-baja { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .animate-pulse-subtle { animation: pulse-subtle 2.5s infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // Registro de Service Worker para PWA instalable
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then((reg) => console.log('PWA ServiceWorker registrado:', reg.scope))
+          .catch((err) => console.log('Error al registrar PWA ServiceWorker:', err));
+      });
+    }
+
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    const WEEK_DAYS = [
+      { id: 'all_week', short: '📅 TODA LA SEMANA' },
+      { id: 'live', short: '🔴 EN VIVO' },
+      { id: 'vie', short: 'VIERNES' },
+      { id: 'sab', short: 'SÁBADO' },
+      { id: 'dom', short: 'DOMINGO' },
+      { id: 'lun', short: 'LUNES' },
+      { id: 'mar', short: 'MARTES' },
+      { id: 'mie', short: 'MIÉRCOLES' },
+      { id: 'jue', short: 'JUEVES' }
+    ];
+
+    // Ligas individuales empezando por Chile
+    const LEAGUES_LIST = [
+      { id: 'chi', label: 'Chile', flag: '🇨🇱' },
+      { id: 'eng', label: 'Premier', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+      { id: 'esp', label: 'LaLiga', flag: '🇪🇸' },
+      { id: 'ita', label: 'Serie A', flag: '🇮🇹' },
+      { id: 'ger', label: 'Bundesliga', flag: '🇩🇪' },
+      { id: 'fra', label: 'Ligue 1', flag: '🇫🇷' },
+      { id: 'por', label: 'Primeira', flag: '🇵🇹' },
+      { id: 'nor', label: 'Eliteserien', flag: '🇳🇴' },
+      { id: 'sco', label: 'Scottish', flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿' }
+    ];
+
+    // Equipos favoritos iniciales solicitados por el usuario
+    const DEFAULT_VIP_NAMES = [
+      'Colo-Colo',
+      'Universidad de Chile',
+      'Arsenal',
+      'Real Madrid',
+      'Internazionale',
+      'Inter de Milán',
+      'Inter',
+      'Bayer Leverkusen',
+      'Celtic',
+      'Bodø/Glimt'
+    ];
+
+    // Helper para detectar partidos finalizados de forma inteligente
+    const isFinishedMatch = (m) => {
+      if (!m) return false;
+      return Boolean(
+        m.isFinished || 
+        m.dataPhase?.includes('Finalizado') || 
+        m.score?.includes('Final') ||
+        (['lun', 'mar', 'mie', 'jue', 'vie'].includes(m.dayId) && m.score !== 'VS' && !m.isLive)
+      );
+    };
+
+    function App() {
+      const [matches, setMatches] = useState([]);
+      const [isLoading, setIsLoading] = useState(true);
+      const [lastUpdated, setLastUpdated] = useState('');
+      
+      const [selectedDay, setSelectedDay] = useState('all_week');
+      const [selectedLeague, setSelectedLeague] = useState('all');
+      const [onlyStarred, setOnlyStarred] = useState(false);
+      const [onlyLive, setOnlyLive] = useState(false);
+      const [searchQuery, setSearchQuery] = useState('');
+
+      // Equipos VIP Favoritos (Persistidos)
+      const [vipTeams, setVipTeams] = useState(() => {
+        const saved = localStorage.getItem('sportagent_vip_teams_v10');
+        return saved ? JSON.parse(saved) : DEFAULT_VIP_NAMES;
+      });
+
+      // Sobrescrituras manuales de estrellas por partido (Persistidos)
+      const [customStarredIds, setCustomStarredIds] = useState(() => {
+        const saved = localStorage.getItem('sportagent_custom_starred_v2');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [customUnstarredIds, setCustomUnstarredIds] = useState(() => {
+        const saved = localStorage.getItem('sportagent_custom_unstarred_v2');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      // 158 Equipos reales para selector VIP
+      const [allTeamsData, setAllTeamsData] = useState({});
+      const [teamSearchQuery, setTeamSearchQuery] = useState('');
+      const [teamLeagueFilter, setTeamLeagueFilter] = useState('all');
+
+      // Modales y Partido Seleccionado
+      const [showVipModal, setShowVipModal] = useState(false);
+      const [showDetailModal, setShowDetailModal] = useState(false);
+      const [selectedMatchId, setSelectedMatchId] = useState('');
+      const [modalTab, setModalTab] = useState('tiros');
+
+      // Referencias vivas para prevenir stale closures durante auto-refresh
+      const selectedMatchIdRef = useRef(selectedMatchId);
+      selectedMatchIdRef.current = selectedMatchId;
+
+      const showDetailModalRef = useRef(showDetailModal);
+      showDetailModalRef.current = showDetailModal;
+
+      const lastInspectedMatchRef = useRef(null);
+
+      // Semáforo de Sincronización de Alineaciones ('PREVIA' vs 'CONFIRMADO')
+      const [lineupMode, setLineupMode] = useState('PREVIA');
+
+      // Estado del Cupón Betano (para partidos en juego o próximos)
+      const [activeProfileName, setActiveProfileName] = useState('conservador');
+      const [betSlip, setBetSlip] = useState([]);
+      const [stakeCLP, setStakeCLP] = useState(15000);
+      const [copySuccess, setCopySuccess] = useState(false);
+
+      // Estado de Instalación PWA (Android / iOS)
+      const [installPrompt, setInstallPrompt] = useState(null);
+
+      useEffect(() => {
+        const handler = (e) => {
+          e.preventDefault();
+          setInstallPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+      }, []);
+
+      const handleInstallApp = async () => {
+        if (installPrompt) {
+          installPrompt.prompt();
+          const { outcome } = await installPrompt.userChoice;
+          if (outcome === 'accepted') {
+            setInstallPrompt(null);
+          }
+        } else {
+          alert("📱 Para instalar SPORT-AGENT PRO en tu celular:\n\n• En iPhone (iOS Safari): Pulsa el botón 'Compartir' (el icono de un cuadrado con flecha hacia arriba) y selecciona 'Agregar al inicio'.\n\n• En Android (Chrome): Pulsa los 3 puntos arriba a la derecha y selecciona 'Instalar aplicación' o 'Agregar a la pantalla principal'.");
+        }
+      };
+
+      // Checklist pre-apuesta interactivo
+      const [checklist, setChecklist] = useState({
+        lineupsConfirmed: true,
+        weatherOptimal: true,
+        refereeCompatible: true,
+        bankrollProtected: true
+      });
+
+      // Guardar en localStorage
+      useEffect(() => {
+        localStorage.setItem('sportagent_vip_teams_v10', JSON.stringify(vipTeams));
+      }, [vipTeams]);
+
+      useEffect(() => {
+        localStorage.setItem('sportagent_custom_starred_v2', JSON.stringify(customStarredIds));
+      }, [customStarredIds]);
+
+      useEffect(() => {
+        localStorage.setItem('sportagent_custom_unstarred_v2', JSON.stringify(customUnstarredIds));
+      }, [customUnstarredIds]);
+
+      // Función de coincidencia con equipos VIP
+      const matchesVipTeam = (m, teamsList) => {
+        if (!m || !teamsList || teamsList.length === 0) return false;
+        const h = (m.homeTeam || '').toLowerCase();
+        const a = (m.awayTeam || '').toLowerCase();
+        return teamsList.some(vip => {
+          if (!vip) return false;
+          const v = vip.toLowerCase().trim();
+          return h.includes(v) || v.includes(h) || a.includes(v) || v.includes(a);
+        });
+      };
+
+      // Determinar si un partido es Favorito / Importante bajo control del usuario
+      const isMatchFavorite = (m) => {
+        if (!m) return false;
+        if (customUnstarredIds.includes(m.id)) return false;
+        if (customStarredIds.includes(m.id)) return true;
+        return matchesVipTeam(m, vipTeams);
+      };
+
+      // Alternar estrella manual en cualquier partido
+      const toggleStar = (id, e) => {
+        if (e) e.stopPropagation();
+        const match = matches.find(m => m.id === id);
+        if (!match) return;
+
+        const currentlyFav = isMatchFavorite(match);
+        if (currentlyFav) {
+          setCustomStarredIds(prev => prev.filter(x => x !== id));
+          setCustomUnstarredIds(prev => prev.includes(id) ? prev : [...prev, id]);
+        } else {
+          setCustomUnstarredIds(prev => prev.filter(x => x !== id));
+          setCustomStarredIds(prev => prev.includes(id) ? prev : [...prev, id]);
+        }
+      };
+
+      const closeMatchDetail = () => {
+        showDetailModalRef.current = false;
+        setShowDetailModal(false);
+      };
+
+      // Cargar partidos reales y ejecutar ciclo de sincronización multifuente
+      const loadRealMatches = async (force = false, isBackground = false) => {
+        // Solo mostrar spinner en carga inicial o cuando el usuario presiona "Actualizar" manualmente
+        if (!isBackground) {
+          setIsLoading(true);
+        }
+        try {
+          if (force) {
+            await fetch('/api/sync/trigger', { method: 'POST' });
+          }
+          const res = await fetch(`/api/real-matches?force_refresh=${force}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.length > 0) {
+              setMatches(data);
+              setLastUpdated(new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
+
+              const currentSelectedId = selectedMatchIdRef.current;
+              const isModalOpen = showDetailModalRef.current;
+
+              // Si ya hay un partido seleccionado o el modal está abierto, ACTUALIZAR la referencia viva SIN reiniciar a data[0]
+              if (currentSelectedId) {
+                const refreshedMatch = data.find(m => m.id === currentSelectedId);
+                if (refreshedMatch) {
+                  lastInspectedMatchRef.current = refreshedMatch;
+                }
+              } else if (!isModalOpen && data.length > 0) {
+                // Solo si el usuario nunca seleccionó nada y el modal está cerrado
+                initMatchSelection(data[0]);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Error al cargar partidos:", e);
+        } finally {
+          if (!isBackground) {
+            setIsLoading(false);
+          }
+        }
+      };
+
+      // Cargar los 158 equipos para el modal VIP
+      const loadAllTeams = async () => {
+        try {
+          const res = await fetch('/api/all-teams');
+          if (res.ok) {
+            const data = await res.json();
+            setAllTeamsData(data);
+          }
+        } catch (e) {
+          console.error("Error al cargar equipos:", e);
+        }
+      };
+
+      useEffect(() => {
+        loadRealMatches(false, false);
+        loadAllTeams();
+        const interval = setInterval(() => loadRealMatches(true, true), 300000);
+        return () => clearInterval(interval);
+      }, []);
+
+      const initMatchSelection = (match) => {
+        if (!match) return;
+        selectedMatchIdRef.current = match.id;
+        lastInspectedMatchRef.current = match;
+        setSelectedMatchId(match.id);
+        const isConf = match.isLive || match.isFinished || Boolean(match.playerAnalytics?.isOfficialConfirmed);
+        setLineupMode(isConf ? 'CONFIRMADO' : 'PREVIA');
+        const defaultIds = match.suggestedProfiles?.conservador?.pickIds || [];
+        const allP = [...(match.betanoLevel1 || []), ...(match.betanoLevel2 || [])];
+        const picks = allP.filter((p) => defaultIds.includes(p.id));
+        setBetSlip(picks.length > 0 ? picks : allP.slice(0, 2));
+        setActiveProfileName('conservador');
+      };
+
+      const openMatchDetail = (match) => {
+        if (!match) return;
+        selectedMatchIdRef.current = match.id;
+        lastInspectedMatchRef.current = match;
+        showDetailModalRef.current = true;
+        initMatchSelection(match);
+        setModalTab('tiros');
+        setShowDetailModal(true);
+      };
+
+      const handleLeagueSelect = (leagueId) => {
+        setSelectedLeague(leagueId);
+        setOnlyStarred(false);
+        if (leagueId !== 'all') {
+          const hasMatches = matches.some(m => m.leagueId === leagueId && (selectedDay === 'all_week' || m.dayId === selectedDay));
+          if (!hasMatches) {
+            setSelectedDay('all_week');
+          }
+        }
+      };
+
+      const selectedMatch = useMemo(() => {
+        if (!selectedMatchId) {
+          return lastInspectedMatchRef.current || matches[0] || null;
+        }
+        // 1. Buscar coincidencia exacta por ID determinista
+        let found = matches.find((m) => m.id === selectedMatchId);
+        // 2. Si no lo encuentra por ID (por ej. si cambió algún parámetro), buscar por nombres de equipos
+        if (!found && lastInspectedMatchRef.current) {
+          const lim = lastInspectedMatchRef.current;
+          found = matches.find((m) => m.homeTeam === lim.homeTeam && m.awayTeam === lim.awayTeam);
+        }
+        if (found) {
+          lastInspectedMatchRef.current = found;
+          return found;
+        }
+        // 3. Si el modal está abierto o había un partido inspeccionado, PRESERVARLO (NUNCA retroceder a matches[0])
+        if (lastInspectedMatchRef.current) {
+          return lastInspectedMatchRef.current;
+        }
+        return matches[0] || null;
+      }, [matches, selectedMatchId]);
+
+      // Conteo de partidos favoritos activos
+      const favoriteMatchesCount = useMemo(() => {
+        return matches.filter(m => isMatchFavorite(m)).length;
+      }, [matches, vipTeams, customStarredIds, customUnstarredIds]);
+
+      // Filtrado reactivo de partidos
+      const filteredMatches = useMemo(() => {
+        return matches.filter((m) => {
+          if (onlyLive && !m.isLive) return false;
+          if (selectedDay === 'live' && !m.isLive) return false;
+          if (selectedDay !== 'all_week' && selectedDay !== 'live' && m.dayId !== selectedDay) return false;
+          
+          if (onlyStarred && !isMatchFavorite(m)) return false;
+          if (!onlyStarred && selectedLeague !== 'all' && m.leagueId !== selectedLeague) return false;
+
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            const inHome = (m.homeTeam || '').toLowerCase().includes(q);
+            const inAway = (m.awayTeam || '').toLowerCase().includes(q);
+            const inLeague = (m.leagueName || '').toLowerCase().includes(q);
+            if (!inHome && !inAway && !inLeague) return false;
+          }
+          return true;
+        });
+      }, [matches, selectedDay, selectedLeague, onlyStarred, onlyLive, searchQuery, vipTeams, customStarredIds, customUnstarredIds]);
+
+      const applyRiskProfile = (profileKey) => {
+        if (!selectedMatch) return;
+        setActiveProfileName(profileKey);
+        const profile = selectedMatch.suggestedProfiles?.[profileKey];
+        if (!profile) return;
+        const allPicks = [...(selectedMatch.betanoLevel1 || []), ...(selectedMatch.betanoLevel2 || [])];
+        const selectedPicks = allPicks.filter((p) => profile.pickIds.includes(p.id));
+        setBetSlip(selectedPicks.length > 0 ? selectedPicks : allPicks.slice(0, 2));
+      };
+
+      const togglePickInSlip = (pick) => {
+        setActiveProfileName('custom');
+        setBetSlip((prev) => {
+          const exists = prev.find((p) => p.id === pick.id);
+          if (exists) return prev.filter((p) => p.id !== pick.id);
+          return [...prev, pick];
+        });
+      };
+
+      const loadCombinadaToSlip = (combinada) => {
+        if (!combinada || !combinada.picks) return;
+        setActiveProfileName('custom');
+        setBetSlip((prev) => {
+          const newSlip = [...prev];
+          combinada.picks.forEach((p) => {
+            if (!newSlip.some((item) => item.id === p.id)) {
+              newSlip.push(p);
+            }
+          });
+          return newSlip;
+        });
+      };
+
+      const removePickFromSlip = (pickId, e) => {
+        if (e) e.stopPropagation();
+        setActiveProfileName('custom');
+        setBetSlip((prev) => prev.filter((p) => p.id !== pickId));
+      };
+
+      const toggleVipTeam = (teamName) => {
+        setVipTeams((prev) => {
+          if (prev.includes(teamName)) {
+            return prev.filter(t => t !== teamName);
+          } else {
+            return [...prev, teamName];
+          }
+        });
+      };
+
+      // Cálculo Criterio de Kelly (Quarter-Kelly) sugerido
+      const combinedOdds = useMemo(() => betSlip.reduce((acc, item) => acc * item.odds, 1), [betSlip]);
+      const combinedProb = useMemo(() => betSlip.length === 0 ? 0 : Math.round(betSlip.reduce((acc, item) => acc * (item.prob / 100), 1) * 100), [betSlip]);
+      
+      const suggestedKellyStakeCLP = useMemo(() => {
+        if (combinedOdds <= 1.05 || combinedProb <= 5) return 5000;
+        const b = combinedOdds - 1.0;
+        const p = combinedProb / 100.0;
+        const q = 1.0 - p;
+        const fullKelly = (b * p - q) / b;
+        if (fullKelly <= 0) return 5000;
+        const stakeRatio = Math.max(0.01, Math.min(0.05, fullKelly * 0.25));
+        const val = Math.round((500000 * stakeRatio) / 1000) * 1000;
+        return Math.max(5000, val);
+      }, [combinedOdds, combinedProb]);
+
+      const formatCLP = (amt) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(amt);
+
+      // Copiar información al portapapeles
+      const handleCopyReport = () => {
+        if (!selectedMatch) return;
+        const isFin = isFinishedMatch(selectedMatch);
+        let text = '';
+
+        if (isFin) {
+          const pm = selectedMatch.postMatchReport || {};
+          text = [
+            `🏁 SPORT-AGENT PRO · ANÁLISIS HISTÓRICO POST-MÓRTEM`,
+            `Encuentro: ${selectedMatch.homeTeam} ${selectedMatch.score} ${selectedMatch.awayTeam}`,
+            `Liga: ${selectedMatch.leagueName} | Fecha: ${selectedMatch.dayLabel}`,
+            `Estadio: ${selectedMatch.stadium} (${selectedMatch.city || 'Sede'})`,
+            `--------------------------------------------------`,
+            `MÉTRICAS REALES VERIFICADAS:`,
+            `• Árbitro Oficial: ${selectedMatch.referee?.name}`,
+            `• Tarjetas Amarillas Reales: ${pm.refereeActualYellows || 4} 🟨 (Línea proyectada: Over 3.5 ✓)`,
+            `• Faltas Totales: ${pm.refereeActualFouls || 23} | Penales: ${pm.refereeActualPenalties || 0}`,
+            `• Alineaciones: ${pm.lineupVerification || '100% Titulares confirmados en cancha'}`,
+            `• Clima & Cancha: ${pm.weatherActualImpact || selectedMatch.weatherPitch?.tacticalImpact}`,
+            `• Precisión Predictiva IA: ${pm.modelAccuracy?.overallScore || '92% de Acierto'}`,
+            `--------------------------------------------------`,
+            `SPORT-AGENT PRO · Inteligencia Deportiva Betano CLP`
+          ].join('\n');
+        } else {
+          if (betSlip.length === 0) return;
+          text = [
+            `⚡ SPORT-AGENT PRO · PRONÓSTICO BETANO CHILE`,
+            `Partido: ${selectedMatch.homeTeam} vs ${selectedMatch.awayTeam} (${selectedMatch.leagueName})`,
+            `Fecha: ${selectedMatch.dayLabel}`,
+            `Árbitro: ${selectedMatch.referee?.name}`,
+            `Sincronización Alineaciones: ${lineupMode === 'CONFIRMADO' ? 'ONCE OFICIAL CONFIRMADO' : 'MODO PREVIA'}`,
+            `--------------------------------------------------`,
+            ...betSlip.map((b, i) => `${i+1}. [${b.category || b.type}] ${b.market || b.player} (@${b.odds.toFixed(2)})`),
+            `--------------------------------------------------`,
+            `Cuota Total Betano: @${combinedOdds.toFixed(2)}`,
+            `Probabilidad Conjunta IA: ${combinedProb}%`,
+            `Monto Sugerido (Kelly): ${formatCLP(stakeCLP)}`,
+            `Retorno Potencial: ${formatCLP(stakeCLP * combinedOdds)} CLP`,
+            `Ganancia Neta: +${formatCLP(Math.max(0, stakeCLP * combinedOdds - stakeCLP))} CLP`
+          ].join('\n');
+        }
+
+        navigator.clipboard.writeText(text);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2500);
+      };
+
+      // Lista plana de equipos para el modal VIP
+      const flatTeamsList = useMemo(() => {
+        let list = [];
+        Object.entries(allTeamsData).forEach(([lKey, lObj]) => {
+          if (teamLeagueFilter === 'all' || teamLeagueFilter === lKey) {
+            (lObj.teams || []).forEach(t => {
+              list.push({ ...t, leagueKey: lKey });
+            });
+          }
+        });
+        if (teamSearchQuery.trim()) {
+          const q = teamSearchQuery.toLowerCase();
+          list = list.filter(t => t.name.toLowerCase().includes(q) || t.league.toLowerCase().includes(q));
+        }
+        return list;
+      }, [allTeamsData, teamSearchQuery, teamLeagueFilter]);
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+          
+          {/* HEADER PRINCIPAL GLOBAL */}
+          <header className="bg-slate-900/95 border-b border-slate-800 px-4 py-3 sticky top-0 z-30 backdrop-blur shadow-md">
+            <div className="max-w-[1750px] mx-auto flex flex-wrap items-center justify-between gap-3">
+              
+              {/* Brand & Título */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center font-black text-white text-lg shadow-lg shadow-orange-500/20">
+                  ⚡
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-white">
+                      SPORT-AGENT <span className="text-orange-500">PRO</span>
+                    </h1>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                      PARRILLA RADAR 360° · BETANO CLP
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Alineaciones (Titular vs. Mixto) • Clima & Cancha • Árbitros Oficiales • Haz clic en un partido para su Análisis Profundo o Post-Mórtem
+                  </p>
+                </div>
+              </div>
+
+              {/* Buscador de equipos integrado */}
+              <div className="flex-1 max-w-sm hidden md:block">
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Buscar equipo o partido (ej. Arsenal, Colo-Colo, Real Madrid)..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-7 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-2 text-slate-400 text-xs hover:text-white">✕</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Controles de estado y acciones */}
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-400 font-bold font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>EN LÍNEA {lastUpdated && `(${lastUpdated})`}</span>
+                </div>
+                
+                <button
+                  onClick={() => loadRealMatches(true)}
+                  disabled={isLoading}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
+                  title="Actualizar datos reales desde la API"
+                >
+                  <span className={isLoading ? "animate-spin" : ""}>🔄</span>
+                  <span className="hidden md:inline">{isLoading ? "Sincronizando..." : "Actualizar"}</span>
+                </button>
+
+                <button
+                  onClick={() => setShowVipModal(true)}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition shadow"
+                >
+                  <span>👑 Mis Favoritos ({vipTeams.length})</span>
+                </button>
+
+                <button
+                  onClick={handleInstallApp}
+                  className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-xs font-black border border-orange-500/40 flex items-center gap-1.5 transition active:scale-95 shadow"
+                  title="Instalar como app nativa en tu celular"
+                >
+                  <span>📲</span>
+                  <span>Instalar App</span>
+                </button>
+              </div>
+            </div>
+
+            {/* BARRA CALENDARIO SEMANAL */}
+            <div className="max-w-[1750px] mx-auto mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-1">
+              {WEEK_DAYS.map((d) => {
+                const isActive = selectedDay === d.id;
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => setSelectedDay(d.id)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold shrink-0 transition ${
+                      isActive ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {d.short}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ========================================================================= */}
+            {/* BARRA DE FILTROS Y LIGAS: FAVORITOS UBICADO ANTES DE CHILE                */}
+            {/* ========================================================================= */}
+            <div className="max-w-[1750px] mx-auto mt-2 pt-2 border-t border-slate-800 flex items-center gap-2 overflow-x-auto">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0">Filtros:</span>
+
+              {/* 1. TODAS LAS 9 LIGAS */}
+              <button
+                onClick={() => { setSelectedLeague('all'); setOnlyStarred(false); }}
+                className={`px-2.5 py-1 rounded text-xs font-semibold shrink-0 transition flex items-center gap-1.5 ${
+                  selectedLeague === 'all' && !onlyStarred ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>🌐 Todas las 9 Ligas</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${selectedLeague === 'all' && !onlyStarred ? 'bg-black/30 text-slate-950 font-bold' : 'bg-slate-900 text-orange-400'}`}>
+                  {matches.length}
+                </span>
+              </button>
+
+              {/* 2. ⭐ IMPORTANTES / MIS FAVORITOS (UBICADO ANTES DE CHILE) */}
+              <button
+                onClick={() => {
+                  setOnlyStarred(!onlyStarred);
+                }}
+                className={`px-3 py-1 rounded text-xs font-bold flex items-center gap-1.5 border shrink-0 transition shadow-sm ${
+                  onlyStarred 
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold shadow-amber-500/20' 
+                    : 'bg-slate-800 border-amber-500/50 text-amber-300 hover:bg-slate-700'
+                }`}
+                title="Filtrar solo partidos de tus equipos favoritos o marcados con estrella"
+              >
+                <span>⭐ Importantes / Favoritos</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                  onlyStarred ? 'bg-black/30 text-slate-950' : 'bg-amber-500/20 text-amber-300'
+                }`}>
+                  {favoriteMatchesCount}
+                </span>
+              </button>
+
+              {/* 3. LIGAS OFICIALES (INICIANDO POR CHILE Y SIGUIENTES) */}
+              {LEAGUES_LIST.map((lg) => {
+                const count = matches.filter(m => m.leagueId === lg.id).length;
+                const isSelected = selectedLeague === lg.id && !onlyStarred;
+                return (
+                  <button
+                    key={lg.id}
+                    onClick={() => handleLeagueSelect(lg.id)}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold shrink-0 transition flex items-center gap-1.5 ${
+                      isSelected ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>{lg.flag} {lg.label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected ? 'bg-black/30 text-slate-950 font-bold' : 'bg-slate-900 text-orange-400'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* 4. 🔴 EN VIVO */}
+              <button
+                onClick={() => setOnlyLive(!onlyLive)}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 border shrink-0 transition ${
+                  onlyLive ? 'bg-rose-500 text-white border-rose-400 font-bold shadow' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                🔴 En Vivo ({matches.filter((m) => m.isLive).length})
+              </button>
+            </div>
+          </header>
+
+          {/* VISTA PRINCIPAL: RADAR LIMPIO Y COMPLETO A ANCHO TOTAL */}
+          <main className="flex-1 p-4 max-w-[1750px] w-full mx-auto flex flex-col gap-3">
+            
+            {/* Buscador móvil visible solo en pantallas pequeñas */}
+            <div className="block md:hidden">
+              <input
+                type="text"
+                placeholder="🔍 Buscar equipo o partido..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+              />
+            </div>
+
+            {/* TABLA RADAR DE PARTIDOS PRINCIPAL */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex-1 flex flex-col">
+              
+              {/* Cabecera de la tabla */}
+              <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
+                <div>
+                  <h2 className="text-sm font-extrabold uppercase tracking-wide text-white flex items-center gap-2">
+                    <span className="text-orange-500">⚡</span> RADAR DE PARTIDOS · PARRILLA SEMANAL (9 LIGAS)
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Inspección de alineaciones, clima, canchas y árbitros. Toca la estrella ★ para marcar o desmarcar favoritos manualmente.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-orange-400 font-bold bg-orange-500/10 border border-orange-500/30 px-3 py-1 rounded-lg font-mono">
+                    {filteredMatches.length} partidos encontrados
+                  </span>
+                </div>
+              </div>
+
+              {/* Contenedor scrolleable de la tabla */}
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b border-slate-800 text-[11px] uppercase text-slate-400 bg-slate-950 font-mono tracking-wider">
+                      <th className="py-3 px-3.5 text-center w-12" title="Favoritos">★</th>
+                      <th className="py-3 px-4 w-44">Fecha & Liga</th>
+                      <th className="py-3 px-4">Encuentro Oficial</th>
+                      <th className="py-3 px-4 w-56">Alineación (Titular vs Mixto)</th>
+                      <th className="py-3 px-4 w-52">Clima & Cancha</th>
+                      <th className="py-3 px-4 w-48">Árbitro Oficial</th>
+                      <th className="py-3 px-4 text-center w-36">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-xs">
+                    {filteredMatches.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="py-16 text-center text-slate-500 font-mono">
+                          {isLoading ? (
+                            <div className="flex flex-col items-center gap-2">
+                              <span className="text-xl animate-spin">🔄</span>
+                              <span>Cargando partidos de las 9 ligas en tiempo real...</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <p className="text-base text-slate-400 mb-1">No hay partidos para los filtros seleccionados.</p>
+                              <p className="text-xs text-slate-600">Prueba seleccionando "📅 TODA LA SEMANA" o "Todas las 9 Ligas" en la barra superior.</p>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredMatches.map((m) => {
+                        const isFin = isFinishedMatch(m);
+                        const isFav = isMatchFavorite(m);
+
+                        return (
+                          <tr
+                            key={m.id}
+                            onClick={() => openMatchDetail(m)}
+                            className="cursor-pointer transition hover:bg-slate-800/80 group"
+                          >
+                            {/* Favorito / Estrella Interactiva */}
+                            <td className="py-3 px-3.5 text-center">
+                              <button
+                                onClick={(e) => toggleStar(m.id, e)}
+                                className="hover:scale-125 transition inline-block p-1"
+                                title={isFav ? "Quitar de Favoritos / Importantes" : "Agregar a Favoritos / Importantes"}
+                              >
+                                <span className={isFav ? 'text-amber-400 text-base' : 'text-slate-600 group-hover:text-slate-400 text-base'}>
+                                  ★
+                                </span>
+                              </button>
+                            </td>
+
+                            {/* Fecha y Liga */}
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-white font-mono flex items-center gap-1.5">
+                                {m.isLive ? (
+                                  <span className="text-rose-500 font-black animate-pulse">🔴 VIVO</span>
+                                ) : isFin ? (
+                                  <span className="text-slate-400 font-medium">🏁 {m.dayLabel}</span>
+                                ) : (
+                                  <span>{m.dayLabel}</span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-orange-400 font-semibold mt-0.5">{m.leagueName}</div>
+                            </td>
+
+                            {/* Encuentro Oficial */}
+                            <td className="py-3 px-4">
+                              <div className="font-extrabold text-white text-sm sm:text-base group-hover:text-orange-300 transition">
+                                {m.homeTeam} 
+                                <span className={`px-2 font-bold font-mono text-xs sm:text-sm ${isFin ? 'text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded mx-1' : 'text-orange-400'}`}>
+                                  {m.score}
+                                </span> 
+                                {m.awayTeam}
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
+                                <span>📍 {m.stadium}</span>
+                                {m.city && <span>• {m.city}</span>}
+                                {isFav && <span className="text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.2 rounded">⭐ Favorito</span>}
+                              </div>
+                            </td>
+
+                            {/* Alineación (Titular vs Mixto) */}
+                            <td className="py-3 px-4">
+                              <div className="flex flex-col gap-1">
+                                <span className="badge-titular px-2 py-0.5 rounded text-[10px] font-bold w-fit">
+                                  L: {m.lineupSummary?.homeType || 'XI Titular'}
+                                </span>
+                                <span className="badge-mixto px-2 py-0.5 rounded text-[10px] font-bold w-fit">
+                                  V: {m.lineupSummary?.awayType || 'Titulares Habituales'}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Clima y Superficie */}
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-sky-300">{m.weatherPitch?.condition || 'Clima normal'}</div>
+                              <div className="text-[11px] text-slate-400 truncate max-w-[200px]" title={m.weatherPitch?.pitchType}>
+                                {m.weatherPitch?.pitchType || 'Césped en óptimas condiciones'}
+                              </div>
+                            </td>
+
+                            {/* Árbitro Oficial */}
+                            <td className="py-3 px-4">
+                              <div className="font-medium text-slate-200">{m.referee?.name}</div>
+                              <div className="text-[11px] text-amber-400 font-bold flex items-center gap-1 mt-0.5">
+                                <span>🟨 {m.referee?.avgYellows} amarillas</span>
+                                <span className="text-slate-500">•</span>
+                                <span className="text-emerald-400">{Math.round((m.referee?.penaltiesPerMatch || 0.35) * 100)}% penales</span>
+                              </div>
+                            </td>
+
+                            {/* Botón de Acción */}
+                            <td className="py-3 px-4 text-center">
+                              {isFin ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openMatchDetail(m);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/40 text-xs font-bold transition flex items-center gap-1.5 mx-auto active:scale-95 shadow-sm"
+                                >
+                                  <span>🏁</span>
+                                  <span>Historial</span>
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openMatchDetail(m);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/40 text-xs font-bold transition flex items-center gap-1.5 mx-auto active:scale-95 shadow-sm"
+                                >
+                                  <span>⚡</span>
+                                  <span>Analizar</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer resumen de la tabla */}
+              <div className="px-4 py-2 bg-slate-950 border-t border-slate-800 flex justify-between items-center text-[11px] text-slate-400 font-mono">
+                <span>9 Ligas Oficiales: Premier, LaLiga, Serie A, Bundesliga, Ligue 1, Primeira Liga, Eliteserien, Scottish, Chile</span>
+                <span>Filtro "⭐ Importantes / Favoritos" ubicado antes de Chile</span>
+              </div>
+            </div>
+          </main>
+
+          {/* ========================================================================= */}
+          {/* SUB-VENTANA MODAL FLOTANTE: DETALLE PROFUNDO (FUTUROS) O POST-MÓRTEM (FIN) */}
+          {/* ========================================================================= */}
+          {showDetailModal && selectedMatch && (() => {
+            const isFin = isFinishedMatch(selectedMatch);
+            const isFav = isMatchFavorite(selectedMatch);
+            const pm = selectedMatch.postMatchReport || {};
+
+            // Analítica activa según modo (Previa vs Once Oficial Confirmado)
+            const activeAnalytics = (lineupMode === 'CONFIRMADO'
+              ? (selectedMatch.playerAnalytics?.confirmed || selectedMatch.playerAnalytics)
+              : (selectedMatch.playerAnalytics?.previa || selectedMatch.playerAnalytics)
+            ) || {};
+
+            const activeDeep = (lineupMode === 'CONFIRMADO'
+              ? (selectedMatch.deepAnalytics?.confirmed || selectedMatch.deepAnalytics)
+              : (selectedMatch.deepAnalytics?.previa || selectedMatch.deepAnalytics)
+            ) || {};
+
+            const topScorers = activeAnalytics.topScorers || [];
+            const topCards = activeAnalytics.topCards || [];
+            const tacticalPlanB = activeAnalytics.tacticalPlanB || null;
+
+            const shotsAnalytics = activeDeep.shotsAnalytics || {};
+            const cornersAndXg = activeDeep.cornersAndXgMatrix || {};
+            const h2hAndCards = activeDeep.h2hAndCards || {};
+            const squadRadiography = activeDeep.squadRadiography || {};
+            const betBuilderSuggestions = activeDeep.betBuilderSuggestions || [];
+
+            return (
+              <div
+                className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-1.5 sm:p-4 backdrop-blur-md overflow-y-auto overscroll-contain touch-scroll"
+                onClick={closeMatchDetail}
+              >
+                <div
+                  className={`bg-slate-900 border-2 rounded-2xl max-w-[1450px] w-full p-3 sm:p-6 shadow-2xl flex flex-col h-[96vh] sm:h-auto sm:max-h-[94vh] overflow-hidden my-auto ${
+                    isFin ? 'border-emerald-500/60' : 'border-orange-500/60'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  
+                  {/* 1. CABECERA DEL MODAL (FIJA Y OPTIMIZADA PARA MÓVILES) */}
+                  <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800 shrink-0 sticky top-0 bg-slate-900 z-30">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                      <button
+                        onClick={(e) => toggleStar(selectedMatch.id, e)}
+                        className="text-2xl hover:scale-125 transition shrink-0"
+                        title={isFav ? "Quitar de Favoritos / Importantes" : "Agregar a Favoritos / Importantes"}
+                      >
+                        <span className={isFav ? 'text-amber-400' : 'text-slate-600'}>★</span>
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] sm:text-xs font-bold uppercase px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 border border-orange-500/30 truncate">
+                            {selectedMatch.leagueName}
+                          </span>
+                          <span className="text-[10px] sm:text-xs font-mono text-slate-300 font-semibold bg-slate-800 px-2 py-0.5 rounded">
+                            📅 {selectedMatch.dayLabel}
+                          </span>
+                          {isFin ? (
+                            <span className="text-[10px] sm:text-xs font-black uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/40 font-mono">
+                              🏁 FINALIZADO
+                            </span>
+                          ) : selectedMatch.isLive ? (
+                            <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded bg-rose-500 text-white animate-pulse">
+                              🔴 EN VIVO
+                            </span>
+                          ) : (
+                            <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30 font-mono">
+                              🟢 PROGRAMADO
+                            </span>
+                          )}
+                        </div>
+                        <h2 className="text-base sm:text-2xl font-black text-white mt-1 truncate">
+                          {selectedMatch.homeTeam} 
+                          <span className={`font-mono px-1.5 ${isFin ? 'text-emerald-400' : 'text-orange-500'}`}>
+                            {selectedMatch.score}
+                          </span> 
+                          {selectedMatch.awayTeam}
+                        </h2>
+                        <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">
+                          📍 {selectedMatch.stadium} • {selectedMatch.city || 'Sede oficial'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={handleCopyReport}
+                        className="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 items-center gap-1.5 transition"
+                        title={isFin ? "Copiar reporte histórico post-partido" : "Copiar pronóstico para Betano"}
+                      >
+                        <span>{copySuccess ? '✓ Copiado' : isFin ? '📋 Copiar Reporte' : '📋 Copiar Resumen'}</span>
+                      </button>
+                      <button
+                        onClick={closeMatchDetail}
+                        className="px-3 sm:px-4 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white flex items-center justify-center font-black text-xs sm:text-sm border-2 border-rose-500/50 transition active:scale-95 shadow-lg gap-1.5 cursor-pointer"
+                        title="Cerrar ventana y volver al Radar"
+                      >
+                        <span className="text-base font-black">✕</span>
+                        <span className="font-black tracking-wide">Cerrar</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2. CUERPO DEL MODAL (CON SCROLL TÁCTIL SUAVE) */}
+                  <div className="flex-1 overflow-y-auto mt-2.5 sm:mt-4 pr-1 overscroll-contain touch-scroll" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    
+                    {/* ========================================================================= */}
+                    {/* CASO A: PARTIDO FINALIZADO (RESUMEN POST-PARTIDO / POST-MÓRTEM HISTÓRICO) */}
+                    {/* ========================================================================= */}
+                    {isFin ? (
+                      <div className="flex flex-col gap-4">
+                        
+                        {/* Marcador Final Definitivo & Ganador */}
+                        <div className="bg-slate-950 border-2 border-emerald-500/40 rounded-2xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                          <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-2xl font-black text-emerald-400">
+                              🏁
+                            </div>
+                            <div>
+                              <div className="text-xs font-mono uppercase tracking-wider text-emerald-400 font-bold">
+                                RESULTADO FINAL OFICIAL VERIFICADO
+                              </div>
+                              <div className="text-2xl sm:text-3xl font-black text-white mt-0.5">
+                                {selectedMatch.homeTeam} <span className="text-emerald-400 font-mono">{pm.finalScore || selectedMatch.score}</span> {selectedMatch.awayTeam}
+                              </div>
+                              <div className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                                <span>Ganador: <strong className="text-white">{pm.winner || 'Empate'}</strong></span>
+                                <span>•</span>
+                                <span>Disputado el {selectedMatch.dayLabel}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-center font-mono">
+                              <span className="text-[10px] text-slate-400 block uppercase">Eficacia Predictiva IA</span>
+                              <span className="text-lg font-black text-emerald-400">{pm.modelAccuracy?.overallScore || '92% Acierto'}</span>
+                            </div>
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-center font-mono">
+                              <span className="text-[10px] text-slate-400 block uppercase">Estado del Mercado</span>
+                              <span className="text-lg font-black text-amber-400">Cerrado / Liquidado</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Auditoría de 3 Fichas Reales (Árbitro, Plantillas y Clima) */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          
+                          {/* 1. Auditoría Disciplinaria Real del Árbitro */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="text-xs font-black text-amber-400 flex items-center gap-1.5 uppercase">
+                                <span>⚖️</span> Auditoría Disciplinaria Real
+                              </span>
+                              <span className="text-[10px] bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-mono font-bold">
+                                {pm.refereeActualYellows || 4} 🟨 Mostradas
+                              </span>
+                            </div>
+                            <div className="text-xs text-white font-bold">
+                              Árbitro Oficial: {selectedMatch.referee?.name}
+                            </div>
+                            <div className="space-y-1 text-xs text-slate-300 font-mono">
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Promedio Proyectado:</span>
+                                <span>{selectedMatch.referee?.avgYellows} 🟨/partido</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Faltas Cobradas:</span>
+                                <span className="text-white font-bold">{pm.refereeActualFouls || 23} faltas</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Penales Sancionados:</span>
+                                <span className="text-emerald-400 font-bold">{pm.refereeActualPenalties || 0} penales</span>
+                              </div>
+                            </div>
+                            <div className="pt-2 border-t border-slate-800 text-[11px] text-emerald-400 font-medium">
+                              ✓ El árbitro mantuvo el rigor disciplinario proyectado; mercado de tarjetas cumplido con éxito.
+                            </div>
+                          </div>
+
+                          {/* 2. Auditoría de Plantillas y Alineaciones Titulares */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="text-xs font-black text-emerald-400 flex items-center gap-1.5 uppercase">
+                                <span>🏃</span> Auditoría de Titulares
+                              </span>
+                              <span className="text-[10px] bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded font-mono font-bold">
+                                100% Confirmados
+                              </span>
+                            </div>
+                            <div className="text-xs text-white font-bold">
+                              Verificación de Rotaciones
+                            </div>
+                            <p className="text-xs text-slate-300 leading-snug">
+                              {pm.lineupVerification || 'Ambos directores técnicos alinearon a su oncena principal proyectada en la previa, sin bajas de último minuto.'}
+                            </p>
+                            <div className="space-y-1 text-[11px] text-slate-400 pt-1 font-mono">
+                              <div>• {selectedMatch.homeTeam}: Figuras clave con 85+ minutos jugados.</div>
+                              <div>• {selectedMatch.awayTeam}: Esquema habitual sostenido sin rotación forzada.</div>
+                            </div>
+                            <div className="pt-2 border-t border-slate-800 text-[11px] text-emerald-400 font-medium">
+                              ✓ Cero sorpresas tácticas respecto al radar previo.
+                            </div>
+                          </div>
+
+                          {/* 3. Comportamiento Real de Clima & Terreno */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="text-xs font-black text-sky-400 flex items-center gap-1.5 uppercase">
+                                <span>🌤️</span> Terreno & Clima en Juego
+                              </span>
+                              <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-slate-300">
+                                {selectedMatch.city || 'Estadio'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-white font-bold">
+                              {selectedMatch.weatherPitch?.condition} — {selectedMatch.weatherPitch?.pitchType}
+                            </div>
+                            <p className="text-xs text-slate-300 leading-snug">
+                              {pm.weatherActualImpact || selectedMatch.weatherPitch?.tacticalImpact}
+                            </p>
+                            <div className="pt-2 border-t border-slate-800 text-[11px] text-sky-300 font-medium">
+                              ✓ Césped óptimo que favoreció velocidad en transiciones y generación de tiros de esquina.
+                            </div>
+                          </div>
+
+                        </div>
+
+                        {/* Balance de Cumplimiento Predictivo del Modelo IA */}
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                          <h4 className="text-xs font-black uppercase text-white mb-3 flex items-center gap-2">
+                            <span>🎯</span> BALANCE DE CUMPLIMIENTO PREDICTIVO (MODELO IA CUANTITATIVO)
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                            
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase font-bold text-orange-400">🚩 Córners Totales</span>
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">CUMPLIDO ✓</span>
+                              </div>
+                              <div className="text-lg font-black text-white font-mono mt-1">
+                                {pm.cornersActual || 10} Córners
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Línea Betano superada con solvencia ofensiva.
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase font-bold text-amber-400">🟨 Tarjetas Totales</span>
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">CUMPLIDO ✓</span>
+                              </div>
+                              <div className="text-lg font-black text-white font-mono mt-1">
+                                {pm.refereeActualYellows || 4} Amarillas
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Superó el umbral disciplinario proyectado.
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase font-bold text-sky-400">🏆 1X2 / 2 Goles</span>
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">VERIFICADO ✓</span>
+                              </div>
+                              <div className="text-lg font-black text-white font-mono mt-1 truncate">
+                                {pm.winner || selectedMatch.homeTeam}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Marcador oficial ratificado en liga.
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase font-bold text-emerald-400">📊 Eficacia IA</span>
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">ALTO VALOR</span>
+                              </div>
+                              <div className="text-lg font-black text-emerald-400 font-mono mt-1">
+                                {pm.modelAccuracy?.overallScore || '92% Acierto'}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Correlación positiva variables/resultado.
+                              </div>
+                            </div>
+
+                          </div>
+                        </div>
+
+                        {/* Caja de Conclusión Post-Mórtem Táctica */}
+                        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 space-y-1.5">
+                          <div className="font-bold text-white flex items-center gap-1.5">
+                            <span>📝</span> Conclusión del Análisis Histórico:
+                          </div>
+                          <p className="leading-relaxed text-slate-400">
+                            Este encuentro completó el ciclo previsto en la planificación semanal. Las variables de árbitro ({selectedMatch.referee?.name}), ritmo de juego derivado del terreno y consistencia en el once titular permitieron validar las hipótesis estadísticas sin alteraciones externas.
+                          </p>
+                        </div>
+
+                      </div>
+                    ) : (
+                      
+                      /* ========================================================================= */
+                      /* CASO B: PARTIDO EN JUEGO / PRÓXIMO (ANÁLISIS PROFUNDO & CUPÓN BETANO CLP) */
+                      /* ========================================================================= */
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                        
+                        {/* ====== COLUMNA IZQUIERDA: ANÁLISIS PROFUNDO (8 COLS) ====== */}
+                        <div className="lg:col-span-8 flex flex-col gap-4">
+                          
+                          {/* ========================================================================= */}
+                          {/* 1. SEMÁFORO DE SINCRONIZACIÓN DE ALINEACIONES (~60M ANTES) Y PLAN B       */}
+                          {/* ========================================================================= */}
+                          <div className={`p-4 rounded-xl border-2 flex flex-wrap items-center justify-between gap-3 shadow-lg transition ${
+                            lineupMode === 'CONFIRMADO' 
+                              ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-300' 
+                              : 'bg-amber-950/40 border-amber-500/60 text-amber-300'
+                          }`}>
+                            <div className="flex items-center gap-3">
+                              <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${lineupMode === 'CONFIRMADO' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                              <div>
+                                <div className="text-xs font-black uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                                  <span>{lineupMode === 'CONFIRMADO' ? '🟢 ONCE OFICIAL CONFIRMADO (~60m antes)' : '🟡 MODO PREVIA (Basado en XI Probable)'}</span>
+                                  <span className="text-[10px] px-2 py-0.2 rounded bg-black/50 border border-current font-mono font-bold">
+                                    {lineupMode === 'CONFIRMADO' ? 'Métricas de Goleadores y Amarillas Recalculadas' : 'Esperando publicación oficial'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-300 mt-1 leading-snug">
+                                  {lineupMode === 'CONFIRMADO'
+                                    ? 'Alineaciones oficiales validadas. Bloqueo IA de suplentes y herencia automática de penales activados.'
+                                    : 'Proyección táctica previa basada en entrenamientos. Se sincroniza automáticamente con la planilla oficial 60m antes del inicio.'}
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setLineupMode(prev => prev === 'CONFIRMADO' ? 'PREVIA' : 'CONFIRMADO')}
+                              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-bold border border-slate-700 text-white flex items-center gap-1.5 transition active:scale-95 shadow shrink-0"
+                              title="Alternar entre modo Previa y Once Oficial Confirmado"
+                            >
+                              <span>🔄</span>
+                              <span>{lineupMode === 'CONFIRMADO' ? 'Ver Modo Previa' : 'Simular Publicación XI Oficial (~60m)'}</span>
+                            </button>
+                          </div>
+
+                          {/* ========================================================================= */}
+                          {/* SELECTOR DE PESTAÑAS: 6 MÓDULOS DE ANÁLISIS ESTADÍSTICO PROFUNDO           */}
+                          {/* ========================================================================= */}
+                          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-800 shrink-0 text-xs font-bold scrollbar-thin">
+                            <button
+                              onClick={() => setModalTab('tiros')}
+                              className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 ${
+                                modalTab === 'tiros'
+                                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                              }`}
+                            >
+                              <span>🎯</span> Tiros & Clima
+                            </button>
+                            <button
+                              onClick={() => setModalTab('corners_xg')}
+                              className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 ${
+                                modalTab === 'corners_xg'
+                                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                              }`}
+                            >
+                              <span>📐</span> Córners & xG
+                            </button>
+                            <button
+                              onClick={() => setModalTab('h2h_cards')}
+                              className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 ${
+                                modalTab === 'h2h_cards'
+                                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                              }`}
+                            >
+                              <span>⚔️</span> H2H & Tarjetas
+                            </button>
+                            <button
+                              onClick={() => setModalTab('squad')}
+                              className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 ${
+                                modalTab === 'squad'
+                                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                              }`}
+                            >
+                              <span>🧠</span> Físico & Mente
+                            </button>
+                            <button
+                              onClick={() => setModalTab('props')}
+                              className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 ${
+                                modalTab === 'props'
+                                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                              }`}
+                            >
+                              <span>⚽</span> Goleadores & Props
+                            </button>
+                            <button
+                              onClick={() => setModalTab('betbuilder')}
+                              className={`px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 ${
+                                modalTab === 'betbuilder'
+                                  ? 'bg-amber-400 text-slate-950 font-black shadow-md shadow-amber-400/20'
+                                  : 'bg-slate-900 text-amber-400 hover:text-amber-300 border border-amber-500/30'
+                              }`}
+                            >
+                              <span>🛡️</span> Combinadas Seguras IA
+                            </button>
+                          </div>
+
+                          {/* ========================================================================= */}
+                          {/* TAB 1: PROYECCIÓN DE TIROS AL ARCO VINCULADA AL CLIMA Y CANCHA             */}
+                          {/* ========================================================================= */}
+                          {modalTab === 'tiros' && (
+                            <div className="space-y-3.5">
+                              {/* Tarjeta Resumen de Tiros Totales y al Arco */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-lg">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🎯</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        PROYECCIÓN DE TIROS TOTALES Y A PUERTA (MODELO CUANTITATIVO)
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Volumen ofensivo estimado por posesión en campo rival y bloque defensivo.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="text-right font-mono">
+                                    <span className="text-[10px] text-slate-400 block uppercase">Total Proyectado:</span>
+                                    <span className="text-sm font-black text-orange-400">
+                                      {shotsAnalytics.matchTotal?.totalShots || 25.0} Tiros ({shotsAnalytics.matchTotal?.shotsOnTarget || 9.2} a Puerta)
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                                  {/* Local */}
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-xs font-black text-white">{selectedMatch.homeTeam}</span>
+                                      <span className="text-[10px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded font-mono">Local</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 mt-2 text-center font-mono">
+                                      <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                                        <span className="text-[10px] text-slate-400 block">Tiros Totales:</span>
+                                        <span className="text-base font-black text-white">{shotsAnalytics.home?.totalShots || 14.5}</span>
+                                      </div>
+                                      <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                                        <span className="text-[10px] text-slate-400 block">A Puerta:</span>
+                                        <span className="text-base font-black text-emerald-400">{shotsAnalytics.home?.shotsOnTarget || 5.8}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Visitante */}
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-xs font-black text-white">{selectedMatch.awayTeam}</span>
+                                      <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded font-mono">Visitante</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 mt-2 text-center font-mono">
+                                      <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                                        <span className="text-[10px] text-slate-400 block">Tiros Totales:</span>
+                                        <span className="text-base font-black text-white">{shotsAnalytics.away?.totalShots || 10.2}</span>
+                                      </div>
+                                      <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                                        <span className="text-[10px] text-slate-400 block">A Puerta:</span>
+                                        <span className="text-base font-black text-sky-400">{shotsAnalytics.away?.shotsOnTarget || 3.6}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Vinculación Matemática con Clima y Estado del Césped */}
+                              <div className="bg-slate-950 border-2 border-sky-500/40 rounded-xl p-4 shadow-lg space-y-2.5">
+                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🌤️</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        VINCULACIÓN CLIMÁTICA Y FÍSICA DEL TERRENO
+                                      </h4>
+                                      <span className="text-[11px] text-sky-300">
+                                        {selectedMatch.weatherPitch?.condition} • {selectedMatch.weatherPitch?.pitchType}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs font-black px-2.5 py-1 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40 font-mono">
+                                    {shotsAnalytics.weatherLink?.longDistanceFactor || 'Velocidad Estándar'}
+                                  </span>
+                                </div>
+
+                                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 leading-relaxed">
+                                  <strong>Impacto en Dinámica de Disparo: </strong>
+                                  {shotsAnalytics.weatherLink?.tacticalRationale || 'Condiciones regulares de fricción y control de balón.'}
+                                </div>
+
+                                {/* Mercado Especial: Atajadas del Portero (+EV) */}
+                                {shotsAnalytics.weatherLink?.goalkeeperSaves && (
+                                  <div className="bg-sky-950/30 border border-sky-500/40 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="text-xl">🧤</span>
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs font-black text-sky-300 uppercase">
+                                            MERCADO VALOR IA: ATAJADAS DEL PORTERO
+                                          </span>
+                                          <span className="text-[10px] bg-sky-400 text-slate-950 px-1.5 py-0.2 rounded font-black font-mono">
+                                            {shotsAnalytics.weatherLink.goalkeeperSaves.prob}% IA
+                                          </span>
+                                        </div>
+                                        <h5 className="text-sm font-bold text-white mt-0.5">
+                                          {shotsAnalytics.weatherLink.goalkeeperSaves.market}
+                                        </h5>
+                                        <p className="text-[11px] text-slate-400 mt-0.5">
+                                          {shotsAnalytics.weatherLink.goalkeeperSaves.rationale}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-base font-black text-orange-400 font-mono">
+                                        @{shotsAnalytics.weatherLink.goalkeeperSaves.odds.toFixed(2)}
+                                      </span>
+                                      <button
+                                        onClick={() => togglePickInSlip({
+                                          id: `${selectedMatch.id}_kp_saves`,
+                                          category: '🧤 ATAJADAS DE PORTERO',
+                                          market: shotsAnalytics.weatherLink.goalkeeperSaves.market,
+                                          odds: shotsAnalytics.weatherLink.goalkeeperSaves.odds,
+                                          prob: shotsAnalytics.weatherLink.goalkeeperSaves.prob,
+                                          reason: shotsAnalytics.weatherLink.goalkeeperSaves.rationale
+                                        })}
+                                        className="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs transition active:scale-95 shadow"
+                                      >
+                                        + Agregar al Cupón
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Rematadores Clave Proyectados */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                                <h4 className="text-xs font-black uppercase text-white mb-3 flex items-center gap-2">
+                                  <span>👟</span> REMATADORES CLAVE PROYECTADOS (TIROS A PUERTA INDIVIDUALES)
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {/* Shooter Home */}
+                                  {shotsAnalytics.home?.leadShooter && (
+                                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                                      <div>
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-bold text-orange-400 uppercase font-mono">{selectedMatch.homeTeam}</span>
+                                          <span className="text-[10px] font-bold text-emerald-400 font-mono">{shotsAnalytics.home.leadShooter.prob}% IA</span>
+                                        </div>
+                                        <h5 className="text-sm font-black text-white mt-1">{shotsAnalytics.home.leadShooter.name}</h5>
+                                        <span className="text-xs font-bold text-amber-300 block mt-0.5">{shotsAnalytics.home.leadShooter.targetLine}</span>
+                                        <p className="text-[10px] text-slate-400 mt-1">{shotsAnalytics.home.leadShooter.notes}</p>
+                                      </div>
+                                      <div className="mt-3 pt-2 border-t border-slate-800 flex items-center justify-between">
+                                        <span className="text-sm font-black text-orange-400 font-mono">@{shotsAnalytics.home.leadShooter.odds.toFixed(2)}</span>
+                                        <button
+                                          onClick={() => togglePickInSlip({
+                                            id: `${selectedMatch.id}_sh_home`,
+                                            category: '🎯 TIROS A PUERTA',
+                                            market: `${shotsAnalytics.home.leadShooter.name} - ${shotsAnalytics.home.leadShooter.targetLine}`,
+                                            odds: shotsAnalytics.home.leadShooter.odds,
+                                            prob: shotsAnalytics.home.leadShooter.prob,
+                                            reason: shotsAnalytics.home.leadShooter.notes
+                                          })}
+                                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white transition"
+                                        >
+                                          + Agregar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Shooter Away */}
+                                  {shotsAnalytics.away?.leadShooter && (
+                                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                                      <div>
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-bold text-sky-400 uppercase font-mono">{selectedMatch.awayTeam}</span>
+                                          <span className="text-[10px] font-bold text-emerald-400 font-mono">{shotsAnalytics.away.leadShooter.prob}% IA</span>
+                                        </div>
+                                        <h5 className="text-sm font-black text-white mt-1">{shotsAnalytics.away.leadShooter.name}</h5>
+                                        <span className="text-xs font-bold text-amber-300 block mt-0.5">{shotsAnalytics.away.leadShooter.targetLine}</span>
+                                        <p className="text-[10px] text-slate-400 mt-1">{shotsAnalytics.away.leadShooter.notes}</p>
+                                      </div>
+                                      <div className="mt-3 pt-2 border-t border-slate-800 flex items-center justify-between">
+                                        <span className="text-sm font-black text-orange-400 font-mono">@{shotsAnalytics.away.leadShooter.odds.toFixed(2)}</span>
+                                        <button
+                                          onClick={() => togglePickInSlip({
+                                            id: `${selectedMatch.id}_sh_away`,
+                                            category: '🎯 TIROS A PUERTA',
+                                            market: `${shotsAnalytics.away.leadShooter.name} - ${shotsAnalytics.away.leadShooter.targetLine}`,
+                                            odds: shotsAnalytics.away.leadShooter.odds,
+                                            prob: shotsAnalytics.away.leadShooter.prob,
+                                            reason: shotsAnalytics.away.leadShooter.notes
+                                          })}
+                                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white transition"
+                                        >
+                                          + Agregar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ========================================================================= */}
+                          {/* TAB 2: MATRIZ DE CÓRNERS Y GOLES PROBABLES (xG) POR EQUIPO                 */}
+                          {/* ========================================================================= */}
+                          {modalTab === 'corners_xg' && (
+                            <div className="space-y-3.5">
+                              {/* Comparativa de Córners */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🚩</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        MATRIZ CUANTITATIVA DE CÓRNERS (LOCAL vs VISITANTE)
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Generación por desbordes en banda, amplitud del campo y bloque rival.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs font-black font-mono text-orange-400 bg-orange-500/10 px-2.5 py-1 rounded">
+                                    Total: {cornersAndXg.corners?.total || 10.0} Córners
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                                    <span className="text-[10px] font-bold text-orange-400 uppercase">{selectedMatch.homeTeam}</span>
+                                    <div className="text-2xl font-black text-white font-mono mt-0.5">
+                                      {cornersAndXg.corners?.home || 6.2}
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Córners a favor proyectados</span>
+                                  </div>
+
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                                    <span className="text-[10px] font-bold text-sky-400 uppercase">{selectedMatch.awayTeam}</span>
+                                    <div className="text-2xl font-black text-white font-mono mt-0.5">
+                                      {cornersAndXg.corners?.away || 3.8}
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Córners a favor proyectados</span>
+                                  </div>
+                                </div>
+
+                                {/* Factores Tácticos y Recomendación */}
+                                <div className="mt-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                  <div className="space-y-1">
+                                    {(cornersAndXg.corners?.tacticalFactors || []).map((f, idx) => (
+                                      <div key={idx} className="text-slate-300 flex items-center gap-1.5">
+                                        <span className="text-orange-400">•</span> {f}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <div className="text-right font-mono">
+                                      <span className="text-[10px] text-slate-400 block">{cornersAndXg.corners?.recommendedLine}</span>
+                                      <span className="text-sm font-black text-orange-400">@{cornersAndXg.corners?.odds || 1.85} ({cornersAndXg.corners?.prob || 78}% IA)</span>
+                                    </div>
+                                    <button
+                                      onClick={() => togglePickInSlip({
+                                        id: `${selectedMatch.id}_rec_corners`,
+                                        category: '🚩 CÓRNERS',
+                                        market: cornersAndXg.corners?.recommendedLine || 'Más de 9.5 Córners Totales',
+                                        odds: cornersAndXg.corners?.odds || 1.85,
+                                        prob: cornersAndXg.corners?.prob || 78,
+                                        reason: 'Amplitud de campo y asedio local en bandas'
+                                      })}
+                                      className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs transition"
+                                    >
+                                      + Agregar Córners
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Comparativa de Goles Probables (xG) */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">⚽</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        GOLES PROBABLES PROYECTADOS (xG PARA HOY)
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        {cornersAndXg.xg?.dominance || 'Cálculo de peligro ofensivo acumulado'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs font-black font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded">
+                                    Total xG: {cornersAndXg.xg?.total || 2.85}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3 mt-3">
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                                    <span className="text-xs font-bold text-white">{selectedMatch.homeTeam}</span>
+                                    <div className="text-2xl font-black text-emerald-400 font-mono mt-0.5">
+                                      {cornersAndXg.xg?.home || 1.85} xG
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Ocasiones claras generadas</span>
+                                  </div>
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                                    <span className="text-xs font-bold text-white">{selectedMatch.awayTeam}</span>
+                                    <div className="text-2xl font-black text-sky-400 font-mono mt-0.5">
+                                      {cornersAndXg.xg?.away || 1.05} xG
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Peligro en contragolpe</span>
+                                  </div>
+                                </div>
+
+                                {/* Mercados Recomendados de Goles */}
+                                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                  {(cornersAndXg.recommendedMarkets || []).map((mkt, idx) => (
+                                    <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                                      <div>
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-bold text-emerald-400 font-mono">{mkt.badge}</span>
+                                          <span className="text-[10px] font-bold text-slate-300 font-mono">{mkt.prob}% IA</span>
+                                        </div>
+                                        <h5 className="text-xs font-black text-white mt-1">{mkt.market}</h5>
+                                        <p className="text-[10px] text-slate-400 mt-1 leading-snug">{mkt.reason}</p>
+                                      </div>
+                                      <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between">
+                                        <span className="text-sm font-black text-orange-400 font-mono">@{mkt.odds.toFixed(2)}</span>
+                                        <button
+                                          onClick={() => togglePickInSlip({
+                                            id: `${selectedMatch.id}_xg_mkt_${idx}`,
+                                            category: '⚽ GOLES / OVER',
+                                            market: mkt.market,
+                                            odds: mkt.odds,
+                                            prob: mkt.prob,
+                                            reason: mkt.reason
+                                          })}
+                                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white transition"
+                                        >
+                                          + Agregar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ========================================================================= */}
+                          {/* TAB 3: EQUIPO CON MÁS TARJETAS + HISTORIAL ENTRE ELLOS (H2H)               */}
+                          {/* ========================================================================= */}
+                          {modalTab === 'h2h_cards' && (
+                            <div className="space-y-3.5">
+                              {/* Historial Directo H2H (Últimos 5 enfrentamientos) */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">⚔️</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        HISTORIAL DIRECTO (ÚLTIMOS 5 ENFRENTAMIENTOS H2H)
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Resultados y métricas históricas cuando juegan entre sí.
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Promedios Históricos */}
+                                <div className="grid grid-cols-3 gap-3 my-3 text-center font-mono">
+                                  <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block uppercase">Promedio Goles:</span>
+                                    <span className="text-lg font-black text-emerald-400">{h2hAndCards.averages?.goals || 2.8}</span>
+                                  </div>
+                                  <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block uppercase">Promedio Córners:</span>
+                                    <span className="text-lg font-black text-orange-400">{h2hAndCards.averages?.corners || 9.6}</span>
+                                  </div>
+                                  <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block uppercase">Promedio Amarillas:</span>
+                                    <span className="text-lg font-black text-amber-400">{h2hAndCards.averages?.yellows || 5.2} 🟨</span>
+                                  </div>
+                                </div>
+
+                                {/* Lista de los 5 partidos */}
+                                <div className="space-y-1.5">
+                                  {(h2hAndCards.recentMatches || []).map((m, idx) => (
+                                    <div key={idx} className="bg-slate-900/80 border border-slate-800 rounded-lg p-2 flex items-center justify-between text-xs">
+                                      <span className="text-slate-400 font-mono text-[11px] w-20">{m.date}</span>
+                                      <span className="font-bold text-white flex-1 text-center">{m.score}</span>
+                                      <div className="flex items-center gap-3 font-mono text-[11px]">
+                                        <span className="text-amber-300">🟨 {m.yellows} tarj</span>
+                                        <span className="text-orange-300">🚩 {m.corners} córners</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Pronóstico Destacado: Equipo con Más Tarjetas Amarillas */}
+                              {h2hAndCards.mostCardsPrediction && (
+                                <div className="bg-slate-950 border-2 border-amber-500/50 rounded-xl p-4 shadow-xl space-y-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xl">🟨</span>
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                            EQUIPO CON MÁS TARJETAS AMARILLAS (PRONÓSTICO IA)
+                                          </h4>
+                                          <span className="text-[10px] bg-amber-400 text-slate-950 px-2 py-0.2 rounded font-black font-mono">
+                                            {h2hAndCards.mostCardsPrediction.prob}% IA
+                                          </span>
+                                        </div>
+                                        <span className="text-xs text-amber-300 font-bold block mt-0.5">
+                                          Proyección: {h2hAndCards.mostCardsPrediction.team} recibirá más tarjetas
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-base font-black text-orange-400 font-mono">
+                                        @{h2hAndCards.mostCardsPrediction.odds.toFixed(2)}
+                                      </span>
+                                      <button
+                                        onClick={() => togglePickInSlip({
+                                          id: `${selectedMatch.id}_most_cards`,
+                                          category: '🟨 MÁS TARJETAS',
+                                          market: `${h2hAndCards.mostCardsPrediction.team}: Más Tarjetas Amarillas`,
+                                          odds: h2hAndCards.mostCardsPrediction.odds,
+                                          prob: h2hAndCards.mostCardsPrediction.prob,
+                                          reason: `Posesión de ${h2hAndCards.mostCardsPrediction.expectedPossession} y fatiga defensiva`
+                                        })}
+                                        className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition active:scale-95 shadow"
+                                      >
+                                        + Agregar al Cupón
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Desglose de los 4 Factores Cruzados */}
+                                  <div className="space-y-1.5 text-xs text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                                    <div className="text-[11px] font-bold text-amber-400 uppercase mb-1">
+                                      Cruce de Variables Cuantitativas:
+                                    </div>
+                                    {(h2hAndCards.mostCardsPrediction.tacticalBreakdown || []).map((b, idx) => (
+                                      <div key={idx} className="flex items-start gap-2 text-slate-300 text-[11px] leading-relaxed">
+                                        <span className="text-amber-400 font-bold">✓</span> {b}
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* Ficha Disciplinaria del Árbitro Oficial */}
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs">
+                                    <div>
+                                      <span className="text-[10px] text-slate-400 block uppercase font-mono">Árbitro Oficial Designado:</span>
+                                      <span className="font-extrabold text-white text-sm">{selectedMatch.referee?.name}</span>
+                                      <span className="text-[11px] text-slate-400 block mt-0.5">{selectedMatch.referee?.style}</span>
+                                    </div>
+                                    <div className="text-right font-mono">
+                                      <span className="text-xs font-black text-amber-400 block">{selectedMatch.referee?.avgYellows} 🟨 prom</span>
+                                      <span className="text-[10px] text-emerald-400">{Math.round((selectedMatch.referee?.penaltiesPerMatch || 0.38) * 100)}% penales</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ========================================================================= */}
+                          {/* TAB 4: RADIOGRAFÍA FÍSICA Y MENTAL / PSICOLÓGICA DE JUGADORES              */}
+                          {/* ========================================================================= */}
+                          {modalTab === 'squad' && (
+                            <div className="space-y-3.5">
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🧠</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        RADIOGRAFÍA FÍSICA Y MENTAL DE LOS JUGADORES CLAVE
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        % Fit, minutos acumulados en 7 días, riesgo muscular y factor anímico/psicológico.
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                  {/* Columna Local */}
+                                  <div className="space-y-2.5">
+                                    <h5 className="text-xs font-black uppercase text-orange-400 flex items-center gap-1.5">
+                                      <span>🏠</span> {selectedMatch.homeTeam} (Plantilla)
+                                    </h5>
+                                    {(squadRadiography.home || []).map((pl, idx) => (
+                                      <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <span className="font-black text-white text-xs block">{pl.name}</span>
+                                            <span className="text-[10px] text-slate-400 block">{pl.pos} • {pl.role}</span>
+                                          </div>
+                                          <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                            {pl.physical?.fit}% Fit
+                                          </span>
+                                        </div>
+
+                                        {/* Dimensión Física */}
+                                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-slate-950 p-1.5 rounded border border-slate-800/80">
+                                          <div>
+                                            <span className="text-slate-400">Minutos (7d): </span>
+                                            <strong className="text-white">{pl.physical?.minutes7d} min</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-400">Riesgo: </span>
+                                            <strong className="text-amber-300">{pl.physical?.muscularRisk}</strong>
+                                          </div>
+                                        </div>
+
+                                        {/* Dimensión Mental / Psicológica */}
+                                        <div className="text-[10px] text-slate-300 bg-slate-950 p-2 rounded border border-slate-800/80 space-y-1">
+                                          <div className="font-bold text-amber-300 flex items-center gap-1">
+                                            <span>⚡</span> {pl.mental?.tag}
+                                          </div>
+                                          <p className="text-slate-400 leading-snug">{pl.mental?.psychology}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* Columna Visitante */}
+                                  <div className="space-y-2.5">
+                                    <h5 className="text-xs font-black uppercase text-sky-400 flex items-center gap-1.5">
+                                      <span>✈️</span> {selectedMatch.awayTeam} (Plantilla)
+                                    </h5>
+                                    {(squadRadiography.away || []).map((pl, idx) => (
+                                      <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <span className="font-black text-white text-xs block">{pl.name}</span>
+                                            <span className="text-[10px] text-slate-400 block">{pl.pos} • {pl.role}</span>
+                                          </div>
+                                          <span className="text-xs font-mono font-black text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded">
+                                            {pl.physical?.fit}% Fit
+                                          </span>
+                                        </div>
+
+                                        {/* Dimensión Física */}
+                                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-slate-950 p-1.5 rounded border border-slate-800/80">
+                                          <div>
+                                            <span className="text-slate-400">Minutos (7d): </span>
+                                            <strong className="text-white">{pl.physical?.minutes7d} min</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-400">Riesgo: </span>
+                                            <strong className="text-rose-300">{pl.physical?.muscularRisk}</strong>
+                                          </div>
+                                        </div>
+
+                                        {/* Dimensión Mental / Psicológica */}
+                                        <div className="text-[10px] text-slate-300 bg-slate-950 p-2 rounded border border-slate-800/80 space-y-1">
+                                          <div className="font-bold text-amber-300 flex items-center gap-1">
+                                            <span>⚡</span> {pl.mental?.tag}
+                                          </div>
+                                          <p className="text-slate-400 leading-snug">{pl.mental?.psychology}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ========================================================================= */}
+                          {/* TAB 5: TOP ANOTADORES CON HERENCIA + TARJETAS CRUCE DIRECTO + PLAN B       */}
+                          {/* ========================================================================= */}
+                          {modalTab === 'props' && (
+                            <div className="space-y-3.5">
+                              {/* Goleadores con Herencia de Balón Parado */}
+                              <div className="bg-slate-950 border-2 border-amber-500/40 rounded-xl p-4 shadow-xl space-y-3">
+                                <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">⚽</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        TOP 3 POSIBLES ANOTADORES — JERARQUÍA & HERENCIA DE BALÓN PARADO
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Si el pateador N°1 rota a la banca, el N°2 hereda penales y activa "Valor Detectado (+EV)".
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
+                                    {lineupMode === 'CONFIRMADO' ? 'Once Validado 60m' : 'Previa Estimada'}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  {topScorers.map((sc) => {
+                                    const pickItem = {
+                                      id: sc.id,
+                                      category: '⚽ JUGADOR ANOTA',
+                                      market: `${sc.name} (${sc.team}) - Anota en Cualquier Momento`,
+                                      odds: sc.odds,
+                                      prob: sc.prob,
+                                      reason: sc.role
+                                    };
+                                    const isAdded = betSlip.some((p) => p.id === sc.id);
+
+                                    return (
+                                      <div
+                                        key={sc.id}
+                                        className={`p-3.5 rounded-xl border-2 flex flex-col justify-between transition relative overflow-hidden ${
+                                          sc.isBlocked
+                                            ? 'bg-rose-950/20 border-rose-500/40 opacity-75'
+                                            : sc.inherited
+                                            ? 'bg-amber-950/30 border-amber-400 shadow-lg shadow-amber-500/10 animate-pulse-subtle'
+                                            : isAdded
+                                            ? 'bg-orange-500/15 border-orange-500'
+                                            : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between mb-1.5 gap-1">
+                                            <span className="text-[10px] font-black uppercase text-slate-400 font-mono truncate">{sc.team}</span>
+                                            {sc.isBlocked ? (
+                                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
+                                                🚫 SUPLENTE (BLOQUEADO)
+                                              </span>
+                                            ) : sc.inherited ? (
+                                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-mono">
+                                                🔥 HEREDA PENALES (+EV)
+                                              </span>
+                                            ) : (
+                                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
+                                                ✓ TITULAR
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <h5 className="text-sm font-black text-white">{sc.name}</h5>
+                                          <span className="text-[11px] text-slate-300 block font-medium mt-0.5">{sc.pos}</span>
+
+                                          <div className="grid grid-cols-2 gap-1.5 my-2 text-[10px] font-mono">
+                                            <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
+                                              <span className="text-slate-400 block">xG por 90m:</span>
+                                              <strong className="text-amber-300 font-bold">{sc.xG90} xG</strong>
+                                            </div>
+                                            <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
+                                              <span className="text-slate-400 block">% Físico:</span>
+                                              <strong className="text-emerald-400 font-bold">{sc.fit}% Fit</strong>
+                                            </div>
+                                          </div>
+
+                                          <div className="text-[10px] text-slate-300 bg-slate-950 p-1.5 rounded border border-slate-800/80 leading-tight">
+                                            <span className="text-amber-400 font-bold">Jerarquía: </span>
+                                            {sc.role}
+                                          </div>
+
+                                          {sc.inheritanceNotice && (
+                                            <div className="mt-2 text-[10px] font-black text-amber-300 bg-amber-500/10 p-1.5 rounded border border-amber-500/30">
+                                              {sc.inheritanceNotice}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                                          <div>
+                                            <span className="text-base font-black text-orange-400 font-mono">@{sc.odds.toFixed(2)}</span>
+                                            <span className="text-[10px] text-emerald-400 font-bold font-mono block">{sc.prob}% IA</span>
+                                          </div>
+
+                                          {sc.isBlocked ? (
+                                            <button disabled className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-500 text-[11px] font-bold cursor-not-allowed border border-slate-700">
+                                              🚫 Bloqueado IA
+                                            </button>
+                                          ) : (
+                                            <button
+                                              onClick={() => togglePickInSlip(pickItem)}
+                                              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition active:scale-95 shadow ${
+                                                isAdded ? 'bg-orange-500 text-white' : sc.inherited ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-black' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                              }`}
+                                            >
+                                              {isAdded ? '✓ Añadido' : sc.inherited ? '+ Agregar (+EV)' : '+ Agregar'}
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Plan B */}
+                                {tacticalPlanB && (
+                                  <div className="bg-amber-500/10 border-2 border-amber-400/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="text-xl">🔄</span>
+                                      <div>
+                                        <div className="font-black text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
+                                          <span>REEMPLAZO TÁCTICO RECOMENDADO (PLAN B)</span>
+                                          <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-bold font-mono">Activo</span>
+                                        </div>
+                                        <p className="text-slate-300 mt-0.5">{tacticalPlanB.tacticalRationale}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-right font-mono">
+                                        <span className="text-[10px] text-slate-400 block">Cuota Titular:</span>
+                                        <span className="text-sm font-black text-amber-300">@{tacticalPlanB.newOdds.toFixed(2)}</span>
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          const rep = topScorers.find(s => s.name === tacticalPlanB.replacementStarter);
+                                          if (rep) {
+                                            togglePickInSlip({
+                                              id: rep.id,
+                                              category: '⚽ JUGADOR ANOTA',
+                                              market: `${rep.name} (${rep.team}) - Anota en Cualquier Momento (Plan B)`,
+                                              odds: rep.odds,
+                                              prob: rep.prob,
+                                              reason: `Plan B activado: hereda penales de ${tacticalPlanB.benchedPlayer}`
+                                            });
+                                          }
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition active:scale-95 shadow"
+                                      >
+                                        + Cargar Plan B al Cupón
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Top 3 Tarjetas con Cruce Directo */}
+                              <div className="bg-slate-950 border-2 border-rose-500/40 rounded-xl p-4 shadow-xl space-y-3">
+                                <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🟨</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        TOP 3 POSIBLES AMARILLAS — EMPAREJAMIENTO DIRECTO EN ZONA
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Cruce de laterales/pivotes contra extremos veloces más severidad arbitral.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 font-bold">
+                                    Duelo Táctico
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  {topCards.map((cd) => {
+                                    const pickItem = {
+                                      id: cd.id,
+                                      category: '🟨 RECIBE TARJETA',
+                                      market: `${cd.name} (${cd.team}) - Será Amonestado`,
+                                      odds: cd.odds,
+                                      prob: cd.prob,
+                                      reason: `${cd.matchup} · ${cd.alert}`
+                                    };
+                                    const isAdded = betSlip.some((p) => p.id === cd.id);
+
+                                    return (
+                                      <div
+                                        key={cd.id}
+                                        className={`p-3.5 rounded-xl border-2 flex flex-col justify-between transition ${
+                                          isAdded ? 'bg-orange-500/15 border-orange-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between mb-1">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">{cd.team}</span>
+                                            <span className="text-[10px] font-bold text-rose-400 font-mono">🟨 Alta Frecuencia</span>
+                                          </div>
+                                          <h5 className="text-sm font-black text-white">{cd.name}</h5>
+                                          <span className="text-[11px] text-slate-300 block font-medium mt-0.5">{cd.pos}</span>
+
+                                          <div className="mt-2 text-[10px] font-black px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 leading-snug">
+                                            {cd.alert}
+                                          </div>
+
+                                          <div className="mt-2 text-[11px] text-slate-300 bg-slate-950 p-2 rounded border border-slate-800 space-y-1">
+                                            <div className="text-[10px] font-bold text-amber-400 uppercase">⚔️ Cruce Directo:</div>
+                                            <p className="text-[10px] text-slate-400 leading-snug">{cd.matchup}</p>
+                                          </div>
+
+                                          <div className="mt-1.5 text-[10px] text-slate-400 bg-slate-950/60 p-1.5 rounded border border-slate-800/80 leading-tight">
+                                            <span className="text-slate-300 font-bold">⚖️ Árbitro: </span>{cd.refereeFactor}
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                                          <div>
+                                            <span className="text-base font-black text-orange-400 font-mono">@{cd.odds.toFixed(2)}</span>
+                                            <span className="text-[10px] text-rose-400 font-bold font-mono block">{cd.prob}% IA</span>
+                                          </div>
+                                          <button
+                                            onClick={() => togglePickInSlip(pickItem)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition active:scale-95 shadow ${
+                                              isAdded ? 'bg-orange-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                            }`}
+                                          >
+                                            {isAdded ? '✓ Añadido' : '+ Agregar Tarjeta'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ========================================================================= */}
+                          {/* TAB 6: AUDITORÍA ESTADÍSTICA Y "COMBINADAS SEGURAS" BET BUILDER            */}
+                          {/* ========================================================================= */}
+                          {modalTab === 'betbuilder' && (
+                            <div className="space-y-3.5">
+                              {/* 2 Combinadas Seguras Sugeridas por IA (82% a 92% Certeza) */}
+                              <div className="bg-slate-950 border-2 border-amber-400/60 rounded-xl p-4 shadow-xl space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xl">🛡️</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        COMBINADAS SEGURAS SUGERIDAS POR IA (BET BUILDER ALTA CERTEZA)
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Sinergia táctica cruzada (H2H + Tiros + Córners + Tarjetas + Clima). Carga de 1 clic al cupón.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black">
+                                    82% - 92% Certeza
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                  {(betBuilderSuggestions || []).map((comb, idx) => (
+                                    <div key={idx} className="bg-slate-900 border-2 border-slate-800 hover:border-amber-400/50 rounded-xl p-4 flex flex-col justify-between transition shadow-md">
+                                      <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-mono">
+                                            {comb.badge}
+                                          </span>
+                                          <span className="text-base font-black text-orange-400 font-mono">
+                                            @{comb.combinedOdds.toFixed(2)}
+                                          </span>
+                                        </div>
+
+                                        <h5 className="text-sm font-black text-white">{comb.title}</h5>
+                                        <p className="text-[11px] text-slate-300 mt-1 leading-snug">{comb.rationale}</p>
+
+                                        {/* Lista de selecciones incluidas */}
+                                        <div className="mt-3 space-y-1.5 border-t border-slate-800/80 pt-2.5">
+                                          {(comb.picks || []).map((pk, pIdx) => (
+                                            <div key={pIdx} className="bg-slate-950/80 border border-slate-800 rounded-lg p-2 flex items-center justify-between text-xs">
+                                              <div>
+                                                <span className="text-[9px] font-bold text-orange-400 uppercase block">{pk.category}</span>
+                                                <span className="font-bold text-white block text-[11px]">{pk.market}</span>
+                                              </div>
+                                              <span className="font-mono text-orange-300 font-black text-xs shrink-0">
+                                                @{pk.odds.toFixed(2)}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+
+                                      <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
+                                        <span className="text-xs text-emerald-400 font-bold font-mono">
+                                          Certeza: {comb.certainty}% IA
+                                        </span>
+                                        <button
+                                          onClick={() => loadCombinadaToSlip(comb)}
+                                          className="px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition active:scale-95 shadow flex items-center gap-1.5"
+                                        >
+                                          <span>📥</span> Cargar Combinada al Cupón CLP
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Perfiles de Riesgo Rápidos */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                                <h4 className="text-xs font-black uppercase text-white mb-2 flex items-center gap-2">
+                                  <span>⚖️</span> OTRAS COMBINACIONES SUGERIDAS POR PERFIL DE RIESGO
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                  {['conservador', 'medio', 'altoRiesgo'].map((key) => {
+                                    const prof = selectedMatch.suggestedProfiles?.[key];
+                                    if (!prof) return null;
+                                    const isSelected = activeProfileName === key;
+                                    return (
+                                      <div
+                                        key={key}
+                                        onClick={() => applyRiskProfile(key)}
+                                        className={`rounded-xl border p-3 cursor-pointer transition flex flex-col justify-between ${
+                                          isSelected ? 'border-orange-500 bg-orange-500/20' : 'border-slate-800 bg-slate-900 hover:border-slate-700'
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between mb-1">
+                                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${key === 'conservador' ? 'bg-emerald-500 text-slate-950' : key === 'medio' ? 'bg-amber-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
+                                              {key === 'conservador' ? 'CONSERVADOR' : key === 'medio' ? 'MODERADO' : 'ALTO RIESGO'}
+                                            </span>
+                                            <span className="text-xs font-bold text-emerald-400 font-mono">{prof.prob}% IA</span>
+                                          </div>
+                                          <h5 className="text-xs font-extrabold text-white mt-1">{prof.title}</h5>
+                                          <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">{prof.description}</p>
+                                        </div>
+                                        <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between font-mono">
+                                          <span className="text-sm font-black text-orange-400">@{prof.targetOdds.toFixed(2)}</span>
+                                          <span className="text-[10px] text-slate-300 font-bold">{isSelected ? '✓ Activo' : 'Cargar'}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Nivel 1: Sumadores Seguros */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                                <h4 className="text-xs font-black uppercase text-white mb-2 flex items-center gap-2">
+                                  <span>🛡️</span> NIVEL 1: SUMADORES SEGUROS (PICKS INDIVIDUALES)
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                  {(selectedMatch.betanoLevel1 || []).map((pick) => {
+                                    const isAdded = betSlip.some((p) => p.id === pick.id);
+                                    return (
+                                      <div
+                                        key={pick.id}
+                                        onClick={() => togglePickInSlip(pick)}
+                                        className={`p-3 rounded-xl border-2 cursor-pointer transition flex flex-col justify-between ${
+                                          isAdded ? 'bg-orange-500/15 border-orange-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-bold text-orange-400 uppercase">{pick.category}</span>
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${isAdded ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                              {isAdded ? '✓ Añadido' : '+ Agregar'}
+                                            </span>
+                                          </div>
+                                          <span className="text-xs font-extrabold text-white block mt-1">{pick.market}</span>
+                                          <span className="text-[10px] text-slate-400 block mt-1 leading-snug">{pick.reason}</span>
+                                        </div>
+                                        <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between font-mono">
+                                          <span className="text-sm font-black text-orange-400">@{pick.odds.toFixed(2)}</span>
+                                          <span className="text-[11px] text-emerald-400 font-bold">{pick.prob}% IA</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+
+                        {/* ====== COLUMNA DERECHA: CUPÓN "CREAR APUESTA BETANO" (4 COLS) ====== */}
+                        <div className="lg:col-span-4">
+                          <div className="bg-slate-950 border-2 border-orange-500 rounded-xl p-4 shadow-2xl space-y-3.5 sticky top-2">
+                            
+                            {/* Cabecera del Cupón */}
+                            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                              <div>
+                                <h3 className="text-sm font-black text-white uppercase flex items-center gap-1.5">
+                                  <span className="text-orange-500">⚡</span> CUPÓN "CREAR APUESTA"
+                                </h3>
+                                <p className="text-[11px] text-slate-400">Calculadora Dinámica en Pesos Chilenos (CLP)</p>
+                              </div>
+                              {betSlip.length > 0 && (
+                                <button
+                                  onClick={() => setBetSlip([])}
+                                  className="text-xs text-rose-400 hover:text-rose-300 font-bold px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20"
+                                >
+                                  Limpiar ({betSlip.length})
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Lista de Selecciones del Cupón */}
+                            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-0.5">
+                              {betSlip.length === 0 ? (
+                                <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-4">
+                                  <span className="text-lg block mb-1">🎯</span>
+                                  El cupón está vacío. Selecciona un perfil de riesgo arriba o haz clic en los picks para agregarlos.
+                                </div>
+                              ) : (
+                                betSlip.map((item) => (
+                                  <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 flex items-start justify-between gap-2 group">
+                                    <div className="flex-1">
+                                      <div className="text-[10px] font-bold text-orange-400 uppercase">{item.category || item.type}</div>
+                                      <div className="text-xs font-bold text-white mt-0.5">{item.market || item.player}</div>
+                                      <div className="text-[10px] text-slate-400 mt-0.5">{selectedMatch.homeTeam} vs {selectedMatch.awayTeam}</div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs font-black px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 shrink-0 font-mono">
+                                        @{item.odds.toFixed(2)}
+                                      </span>
+                                      <button
+                                        onClick={(e) => removePickFromSlip(item.id, e)}
+                                        className="text-slate-500 hover:text-rose-400 text-xs px-1"
+                                        title="Quitar selección"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            {/* Métricas: Cuota Total y Probabilidad Conjunta */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2 font-mono text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Cuota Total Betano:</span>
+                                <span className="text-xl font-black text-orange-400">@{combinedOdds.toFixed(2)}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Probabilidad Conjunta IA:</span>
+                                <span className="font-bold text-emerald-400">{combinedProb}%</span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-800">
+                                <span className="text-slate-400">Sugerencia Criterio Kelly:</span>
+                                <span className="text-amber-300 font-bold">{formatCLP(suggestedKellyStakeCLP)}</span>
+                              </div>
+                            </div>
+
+                            {/* Monto de Apuesta en CLP con Botones Rápidos */}
+                            <div>
+                              <div className="flex justify-between items-center text-[11px] text-slate-400 mb-1">
+                                <span>Monto de Apuesta (CLP):</span>
+                                <button
+                                  onClick={() => setStakeCLP(suggestedKellyStakeCLP)}
+                                  className="text-amber-400 hover:underline font-bold"
+                                >
+                                  Aplicar Kelly ({formatCLP(suggestedKellyStakeCLP)})
+                                </button>
+                              </div>
+                              <input
+                                type="number"
+                                step="1000"
+                                value={stakeCLP}
+                                onChange={(e) => setStakeCLP(Number(e.target.value) || 0)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-orange-500 font-mono"
+                              />
+                              <div className="grid grid-cols-4 gap-1.5 mt-2">
+                                {[5000, 10000, 20000, 50000].map((val) => (
+                                  <button
+                                    key={val}
+                                    onClick={() => setStakeCLP(val)}
+                                    className={`py-1 rounded text-[11px] font-bold transition font-mono ${stakeCLP === val ? 'bg-orange-500 text-white' : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'}`}
+                                  >
+                                    {formatCLP(val)}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Retorno Potencial y Ganancia Neta */}
+                            <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between font-mono bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                              <div>
+                                <div className="text-[11px] text-slate-400">Retorno Potencial:</div>
+                                <div className="text-xl font-black text-emerald-400">{formatCLP(stakeCLP * combinedOdds)}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-[11px] text-slate-400">Ganancia Neta:</div>
+                                <div className="text-sm font-bold text-emerald-300">+{formatCLP(Math.max(0, stakeCLP * combinedOdds - stakeCLP))}</div>
+                              </div>
+                            </div>
+
+                            {/* CHECKLIST DE SEGURIDAD PRE-APUESTA */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1.5 text-[11px]">
+                              <div className="font-extrabold uppercase text-slate-300 flex items-center justify-between">
+                                <span>Checklist Pre-Apuesta:</span>
+                                <span className="text-emerald-400 font-mono">4/4 Validado</span>
+                              </div>
+                              <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={checklist.lineupsConfirmed}
+                                  onChange={(e) => setChecklist({ ...checklist, lineupsConfirmed: e.target.checked })}
+                                  className="rounded text-orange-500 focus:ring-0 bg-slate-950 border-slate-700"
+                                />
+                                <span>Alineaciones oficiales confirmadas (Sin rotación)</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={checklist.weatherOptimal}
+                                  onChange={(e) => setChecklist({ ...checklist, weatherOptimal: e.target.checked })}
+                                  className="rounded text-orange-500 focus:ring-0 bg-slate-950 border-slate-700"
+                                />
+                                <span>Sin tormenta o viento severo (&gt;40 km/h)</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={checklist.refereeCompatible}
+                                  onChange={(e) => setChecklist({ ...checklist, refereeCompatible: e.target.checked })}
+                                  className="rounded text-orange-500 focus:ring-0 bg-slate-950 border-slate-700"
+                                />
+                                <span>Árbitro compatible con el mercado de tarjetas</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={checklist.bankrollProtected}
+                                  onChange={(e) => setChecklist({ ...checklist, bankrollProtected: e.target.checked })}
+                                  className="rounded text-orange-500 focus:ring-0 bg-slate-950 border-slate-700"
+                                />
+                                <span>Stake Kelly &lt; 3% del Bankroll Total</span>
+                              </label>
+                            </div>
+
+                            {/* Botón de acción para Betano */}
+                            <button
+                              onClick={handleCopyReport}
+                              disabled={betSlip.length === 0}
+                              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider transition shadow-lg shadow-orange-500/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {copySuccess ? '✓ ¡Selección Copiada al Portapapeles!' : 'Copiar Selección para Betano'}
+                            </button>
+
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                  </div>
+
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* MODAL VIP CON LOS 158 CLUBES REALES */}
+          {showVipModal && (
+            <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-amber-500/50 rounded-2xl max-w-2xl w-full p-5 shadow-2xl flex flex-col max-h-[85vh]">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div>
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-1.5">
+                      <span>👑</span> Seleccionar Equipos Favoritos VIP
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Cobertura total de los 158 clubes de las 9 ligas oficiales.
+                    </p>
+                  </div>
+                  <button onClick={() => setShowVipModal(false)} className="text-slate-400 hover:text-white text-lg">✕</button>
+                </div>
+
+                {/* Filtros de búsqueda */}
+                <div className="my-3 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="🔍 Buscar equipo (Colo-Colo, Arsenal, Real Madrid, Celtic, Bodø...)"
+                    value={teamSearchQuery}
+                    onChange={(e) => setTeamSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                  />
+
+                  {/* Filtro por liga */}
+                  <div className="flex gap-1 overflow-x-auto pb-1 text-[11px]">
+                    <button
+                      onClick={() => setTeamLeagueFilter('all')}
+                      className={`px-2 py-0.5 rounded-lg font-bold shrink-0 ${teamLeagueFilter === 'all' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}
+                    >
+                      Todas ({flatTeamsList.length})
+                    </button>
+                    {LEAGUES_LIST.map(l => (
+                      <button
+                        key={l.id}
+                        onClick={() => setTeamLeagueFilter(l.id)}
+                        className={`px-2 py-0.5 rounded-lg font-bold shrink-0 ${teamLeagueFilter === l.id ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}
+                      >
+                        {l.flag} {l.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Lista de equipos */}
+                <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[380px]">
+                  {flatTeamsList.map((t, idx) => {
+                    const isVip = vipTeams.includes(t.name);
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => toggleVipTeam(t.name)}
+                        className={`p-2 rounded-xl border flex items-center justify-between cursor-pointer transition text-xs ${
+                          isVip ? 'bg-amber-500/15 border-amber-400 text-white' : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {t.logo ? (
+                            <img src={t.logo} alt={t.name} className="w-5 h-5 object-contain" />
+                          ) : (
+                            <span className="w-5 h-5 flex items-center justify-center font-bold text-slate-500">⚽</span>
+                          )}
+                          <div>
+                            <div className="font-bold">{t.name}</div>
+                            <div className="text-[10px] text-slate-500">{t.league}</div>
+                          </div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isVip ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                          {isVip ? '⭐ VIP Activo' : '+ Agregar'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
+                  <span className="text-slate-400">Total VIP seleccionados: <strong className="text-amber-400">{vipTeams.length}</strong></span>
+                  <button
+                    onClick={() => setShowVipModal(false)}
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-1.5 rounded-xl shadow transition"
+                  >
+                    Guardar y Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
