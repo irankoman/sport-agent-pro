@@ -870,10 +870,15 @@
                                 </span> 
                                 {m.awayTeam}
                               </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
+                              <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
                                 <span>📍 {m.stadium}</span>
                                 {m.city && <span>• {m.city}</span>}
                                 {isFav && <span className="text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.2 rounded">⭐ Favorito</span>}
+                                {m.oddsDetails && (
+                                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold flex items-center gap-1">
+                                    <span>📊</span> 1: @{m.oddsDetails.homeWin.toFixed(2)} · 2: @{m.oddsDetails.awayWin.toFixed(2)}
+                                  </span>
+                                )}
                               </div>
                             </td>
 
@@ -1032,6 +1037,20 @@
                         <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">
                           📍 {selectedMatch.stadium} • {selectedMatch.city || 'Sede oficial'}
                         </p>
+                        {selectedMatch.oddsDetails && (
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] font-mono">
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
+                              <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                            </span>
+                            <span className="text-slate-300">
+                              1X2: <strong className="text-orange-400">@{selectedMatch.oddsDetails.homeWin.toFixed(2)}</strong> / <strong className="text-slate-200">@{selectedMatch.oddsDetails.draw.toFixed(2)}</strong> / <strong className="text-orange-400">@{selectedMatch.oddsDetails.awayWin.toFixed(2)}</strong>
+                            </span>
+                            <span className="text-slate-500 hidden sm:inline">•</span>
+                            <span className="text-slate-300 hidden sm:inline">
+                              O/U {selectedMatch.oddsDetails.goalsLine}: <strong className="text-emerald-400">@{selectedMatch.oddsDetails.overGoals.toFixed(2)}</strong>
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -2052,9 +2071,14 @@
                                       </p>
                                     </div>
                                   </div>
-                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
-                                    {lineupMode === 'CONFIRMADO' ? 'Once Validado 60m' : 'Previa Estimada'}
-                                  </span>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
+                                      <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                                    </span>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
+                                      {lineupMode === 'CONFIRMADO' ? 'Once Validado 60m' : 'Previa Estimada'}
+                                    </span>
+                                  </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2128,7 +2152,10 @@
 
                                         <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
                                           <div>
-                                            <span className="text-base font-black text-orange-400 font-mono">@{sc.odds.toFixed(2)}</span>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-base font-black text-orange-400 font-mono">@{sc.odds.toFixed(2)}</span>
+                                              <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">Ref. Betano</span>
+                                            </div>
                                             <span className="text-[10px] text-emerald-400 font-bold font-mono block">{sc.prob}% IA</span>
                                           </div>
 
@@ -2207,9 +2234,14 @@
                                       </p>
                                     </div>
                                   </div>
-                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 font-bold">
-                                    Duelo Táctico
-                                  </span>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
+                                      <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                                    </span>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 font-bold">
+                                      Duelo Táctico
+                                    </span>
+                                  </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2255,7 +2287,10 @@
 
                                         <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
                                           <div>
-                                            <span className="text-base font-black text-orange-400 font-mono">@{cd.odds.toFixed(2)}</span>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-base font-black text-orange-400 font-mono">@{cd.odds.toFixed(2)}</span>
+                                              <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">Ref. Betano</span>
+                                            </div>
                                             <span className="text-[10px] text-rose-400 font-bold font-mono block">{cd.prob}% IA</span>
                                           </div>
                                           <button
@@ -2387,9 +2422,14 @@
 
                               {/* Nivel 1: Sumadores Seguros */}
                               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-                                <h4 className="text-xs font-black uppercase text-white mb-2 flex items-center gap-2">
-                                  <span>🛡️</span> NIVEL 1: SUMADORES SEGUROS (PICKS INDIVIDUALES)
-                                </h4>
+                                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                                  <h4 className="text-xs font-black uppercase text-white flex items-center gap-2">
+                                    <span>🛡️</span> NIVEL 1: SUMADORES SEGUROS (PICKS INDIVIDUALES)
+                                  </h4>
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
+                                    <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                                  </span>
+                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
                                   {(selectedMatch.betanoLevel1 || []).map((pick) => {
                                     const isAdded = betSlip.some((p) => p.id === pick.id);
@@ -2412,7 +2452,10 @@
                                           <span className="text-[10px] text-slate-400 block mt-1 leading-snug">{pick.reason}</span>
                                         </div>
                                         <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between font-mono">
-                                          <span className="text-sm font-black text-orange-400">@{pick.odds.toFixed(2)}</span>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-sm font-black text-orange-400">@{pick.odds.toFixed(2)}</span>
+                                            <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">Ref. Betano</span>
+                                          </div>
                                           <span className="text-[11px] text-emerald-400 font-bold">{pick.prob}% IA</span>
                                         </div>
                                       </div>

@@ -314,12 +314,14 @@ class RealSportsService:
                 official_from_api=api_official
             )
 
-            # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL
+            # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL (Live Odds & Betano Calibration Engine)
             odds_data = BetanoOddsService.extract_or_calculate_odds(
                 comp=comp,
                 home_name=home_name,
                 away_name=away_name,
-                referee_stats=ref_stats
+                referee_stats=ref_stats,
+                league_code=espn_league_code,
+                event_id=espn_event_id
             )
 
             p1_id = f"{ev_id}_p1"
@@ -390,6 +392,18 @@ class RealSportsService:
                 "stadium": venue_name,
                 "city": city,
                 "starred": False,
+                "oddsSource": odds_data.get("source", "📊 Cuota Mercado (Ref. Betano/Live)"),
+                "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)",
+                "syncTimestamp": odds_data.get("last_sync", "Reciente"),
+                "oddsDetails": {
+                    "homeWin": odds_data["home_win_odds"],
+                    "draw": odds_data["draw_odds"],
+                    "awayWin": odds_data["away_win_odds"],
+                    "overGoals": odds_data["over_goals_odds"],
+                    "underGoals": odds_data.get("under_goals_odds", 1.95),
+                    "goalsLine": odds_data["goals_line"],
+                    "provider": odds_data.get("provider", "Betano / Mercado Real")
+                },
                 "lineupSummary": {
                   "homeType": "XI 100% TITULAR" if not home_bajas else f"XI CON {len(home_bajas)} BAJA(S)",
                   "homeBadge": "green" if not home_bajas else "amber",
@@ -470,7 +484,8 @@ class RealSportsService:
                 is_official_confirmed=is_official,
                 league_code=espn_league_code,
                 home_team_id=home_team_id,
-                away_team_id=away_team_id
+                away_team_id=away_team_id,
+                odds_data=odds_data
             )
 
             # Analítica estadística y táctica profunda (Tiros al arco, clima, matriz córners/xG, H2H, psicología, Bet Builder)
