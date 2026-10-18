@@ -10,6 +10,7 @@ Integra 6 módulos avanzados para la Sub-Ventana de Detalle:
 """
 import hashlib
 from typing import Dict, Any, List
+from backend.data.team_rosters import get_team_roster
 
 class DeepStatsEngine:
     @classmethod
@@ -145,10 +146,12 @@ class DeepStatsEngine:
         total_ontarget = round(final_home_ontarget + final_away_ontarget, 1)
 
         # Identificar shooters según alineación activa
+        home_prof = get_team_roster(home_name)
+        away_prof = get_team_roster(away_name)
         scorers = player_state.get("topScorers", [])
-        sc1 = scorers[0] if len(scorers) > 0 else {"name": f"Delantero {home_name}", "team": home_name, "isBlocked": False, "odds": 2.20}
-        sc2 = scorers[1] if len(scorers) > 1 else {"name": f"Segundo Artillero ({home_name})", "team": home_name, "isBlocked": False, "odds": 2.70}
-        sc3 = scorers[2] if len(scorers) > 2 else {"name": f"Goleador {away_name}", "team": away_name, "isBlocked": False, "odds": 2.40}
+        sc1 = scorers[0] if len(scorers) > 0 else {"name": home_prof["scorers"][0]["name"], "team": home_name, "isBlocked": False, "odds": 2.20}
+        sc2 = scorers[1] if len(scorers) > 1 else {"name": home_prof["scorers"][1]["name"] if len(home_prof["scorers"]) > 1 else home_prof["scorers"][0]["name"], "team": home_name, "isBlocked": False, "odds": 2.70}
+        sc3 = scorers[2] if len(scorers) > 2 else {"name": away_prof["scorers"][0]["name"], "team": away_name, "isBlocked": False, "odds": 2.40}
 
         # Si el 1 está bloqueado por suplente, el 2 asume la línea estelar
         if sc1.get("isBlocked", False):
@@ -298,6 +301,10 @@ class DeepStatsEngine:
         most_cards_prob = 67
         most_cards_odds = 1.90
 
+        card_players = player_state.get("topCards", [])
+        c1_player = card_players[0] if len(card_players) > 0 else away_prof["cards"][0]
+        c2_player = card_players[1] if len(card_players) > 1 else (away_prof["cards"][1] if len(away_prof["cards"]) > 1 else away_prof["cards"][0])
+
         h2h_and_cards = {
             "recentMatches": h2h_matches,
             "averages": {
@@ -312,7 +319,7 @@ class DeepStatsEngine:
                 "expectedPossession": f"{expected_away_possession}% (Visitante corre tras el balón)",
                 "tacticalBreakdown": [
                     f"1. Posesión Desigual: {away_name} ({expected_away_possession}%) se verá forzado a cortar transiciones en repliegue.",
-                    f"2. Fatiga Acumulada: Zaga visitante promedia más de 180 min de exigencia física en los últimos 7 días.",
+                    f"2. Fatiga Acumulada: Zaga de {away_name} ({c1_player['name']} y {c2_player['name']}) promedia más de 180 min de exigencia física en los últimos 7 días.",
                     f"3. Fricción Histórica: El duelo directo H2H promedia {avg_h2h_yellows} tarjetas amarillas por encuentro.",
                     f"4. Árbitro Oficial: {getattr(referee_stats, 'name', 'Árbitro')} aplica {ref_strictness} con {ref_avg} tarjetas/partido."
                 ]
@@ -320,13 +327,14 @@ class DeepStatsEngine:
         }
 
         # =========================================================================
-        # 4. RADIOGRAFÍA FÍSICA Y MENTAL / PSICOLÓGICA DE JUGADORES
+        # 4. RADIOGRAFÍA FÍSICA Y MENTAL / PSICOLÓGICA DE JUGADORES (FUTBOLISTAS REALES)
         # =========================================================================
+        home_card_p1 = home_prof["cards"][0]
         home_players = [
             {
                 "name": sc1["name"],
-                "role": "Delantero Referente / Pateador N°1",
-                "pos": "Delantero Centro",
+                "role": sc1.get("role", f"Goleador Titular de {home_name}"),
+                "pos": f"Pateador N°1: Penales y Definición ({home_name})",
                 "physical": {
                     "fit": sc1.get("fit", 96),
                     "minutes7d": 180 if not sc1.get("isBlocked") else 35,
@@ -334,89 +342,85 @@ class DeepStatsEngine:
                 },
                 "mental": {
                     "confidence": "🔥 Máxima Confianza",
-                    "tag": "🔥 En racha goleadora (3 goles en últimos 4 partidos)",
-                    "psychology": "Líder de ataque con respaldo absoluto del cuerpo técnico."
+                    "tag": f"🔥 {sc1['name']} en racha goleadora (3 goles en últimos 4 partidos)",
+                    "psychology": f"Líder de ataque de {home_name} con respaldo absoluto del cuerpo técnico."
                 }
             },
             {
                 "name": sc2["name"],
-                "role": "Segundo Artillero / Extremo" if not sc1.get("isBlocked") else "🔥 Titular & Heredero Balón Parado",
-                "pos": "Extremo / Segundo Delantero",
+                "role": sc2.get("role", f"Pateador N°2 de {home_name}"),
+                "pos": f"Pateador Designado / Balón Parado ({home_name})",
                 "physical": {
-                    "fit": 98,
+                    "fit": sc2.get("fit", 98),
                     "minutes7d": 160,
                     "muscularRisk": "🟢 Bajo"
                 },
                 "mental": {
                     "confidence": "🎯 Motivación Extra",
-                    "tag": "🎯 Ley del Ex (Enfrenta a su ex-club)",
-                    "psychology": "Motivación personal multiplicada por enfrentar a su antiguo equipo."
+                    "tag": f"🎯 {sc2['name']} con motivación multiplicada en el ataque",
+                    "psychology": "Precisión en balones parados y diagonales al área rival."
                 }
             },
             {
-                "name": f"Pivote Defensivo ({home_name})",
-                "role": "Mediocentro de Contención",
-                "pos": "Volante Tapón",
+                "name": home_card_p1["name"],
+                "role": home_card_p1.get("role", f"Zaguero de Corte de {home_name}"),
+                "pos": f"Corte Táctico y Recuperación ({home_name})",
                 "physical": {
-                    "fit": 91,
+                    "fit": home_card_p1.get("fit", 91),
                     "minutes7d": 270,
                     "muscularRisk": "🟡 Moderado (Sobrecarga de Minutos)"
                 },
                 "mental": {
                     "confidence": "🟨 Alta Presión",
-                    "tag": "🟨 Condicionado (A 1 amarilla de suspensión)",
+                    "tag": f"🟨 {home_card_p1['name']} apercibido (A 1 tarjeta de suspensión)",
                     "psychology": "Debe medir las entradas a destiempo para no perderse el próximo partido clave."
                 }
             }
         ]
 
-        card_players = player_state.get("topCards", [])
-        c1 = card_players[0] if len(card_players) > 0 else {"name": f"Lateral Marcador ({away_name})"}
-        c2 = card_players[1] if len(card_players) > 1 else {"name": f"Central Stopper ({away_name})"}
-
         away_players = [
             {
                 "name": sc3["name"],
-                "role": "Goleador Visitante",
-                "pos": "Delantero",
+                "role": sc3.get("role", f"Referente Ofensivo de {away_name}"),
+                "pos": f"Artillero Titular ({away_name})",
                 "physical": {
-                    "fit": 94,
+                    "fit": sc3.get("fit", 94),
                     "minutes7d": 190,
                     "muscularRisk": "🟢 Bajo"
                 },
                 "mental": {
                     "confidence": "⚡ Presión por Sequía",
-                    "tag": "⚡ Presionado por críticas de prensa (2 partidos sin anotar)",
+                    "tag": f"⚡ {sc3['name']} enfocado en romper racha sin anotar",
                     "psychology": "Ansiedad ofensiva; probará remates rápidos desde cualquier ángulo."
                 }
             },
             {
-                "name": c1["name"],
-                "role": "Lateral Exigido en Duelo Directo",
-                "pos": "Lateral Defensivo",
+                "name": c1_player["name"],
+                "role": c1_player.get("role", f"Marcador de Choque de {away_name}"),
+                "pos": f"Duelo al Hombre y Repliegue ({away_name})",
                 "physical": {
-                    "fit": 78,
+                    "fit": c1_player.get("fit", 78),
                     "minutes7d": 240,
                     "muscularRisk": "🔴 Alto Riesgo de Sobrecarga"
                 },
                 "mental": {
                     "confidence": "⚠️ Alerta Disciplinaria",
-                    "tag": "⚠️ Temperamento volátil ante réferis rigurosos",
-                    "psychology": "Sufre en repliegues ante extremos veloces; alta probabilidad de foul táctico."
+                    "tag": f"⚠️ {c1_player['name']} temperamento volátil ante árbitros rigurosos",
+                    "psychology": f"Sufre en repliegues ante la velocidad de {sc1['name']}; alta probabilidad de amonestación."
                 }
             },
             {
-                "name": c2["name"],
-                "role": "Defensa Central de Contención",
-                "pos": "Defensa Central",
+                "name": c2_player["name"],
+                "role": c2_player.get("role", f"Stopper de Choque de {away_name}"),
+                "pos": f"Zaguero de Anticipación ({away_name})",
                 "physical": {
-                    "fit": 90,
+                    "fit": c2_player.get("fit", 90),
                     "minutes7d": 210,
                     "muscularRisk": "🟡 Moderado"
                 },
                 "mental": {
                     "confidence": "🛡️ Firmeza Táctica",
-                    "tag": "🛡️ Especialista en intercepciones y faltas de zona",
+                    "tag": f"🛡️ {c2_player['name']} especialista en intercepciones",
                     "psychology": "Ordena la zaga ante el asedio constante en balones aéreos."
                 }
             }

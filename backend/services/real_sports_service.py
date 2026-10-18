@@ -15,6 +15,7 @@ from backend.engines.referee_engine import RefereeEngine
 from backend.services.odds_service import BetanoOddsService
 from backend.engines.player_props_engine import PlayerPropsEngine
 from backend.engines.deep_stats_engine import DeepStatsEngine
+from backend.data.team_rosters import get_team_roster
 
 LEAGUE_CONFIG = {
     "chi": {
@@ -313,6 +314,13 @@ class RealSportsService:
             med_odds = round(odds_data["home_win_odds"] * 1.35, 2)
             high_odds = round(odds_data["home_win_odds"] * odds_data["card_odds"] * 1.70, 2)
 
+            home_roster = get_team_roster(home_name)
+            away_roster = get_team_roster(away_name)
+            h_sc = home_roster["scorers"][0]
+            h_card = home_roster["cards"][0]
+            a_sc = away_roster["scorers"][0]
+            a_card = away_roster["cards"][0]
+
             match_data = {
                 "id": ev_id,
                 "dayId": day_id,
@@ -351,18 +359,18 @@ class RealSportsService:
                 "teamStatus": {
                   "home": {
                     "lineupStatus": "ONCE TITULAR CONFIRMADO",
-                    "rotationReason": "Plantilla disponible al 100%.",
+                    "rotationReason": f"Plantilla de {home_name} disponible al 100%.",
                     "players": [
-                        { "name": f"Delantero {home_name}", "role": "Titular (90m)", "fit": 97, "note": "Dueño de penales en Betano" },
-                        { "name": f"Mediocentro {home_name}", "role": "Titular (85m)", "fit": 94, "note": "Recuperador principal" }
+                        { "name": h_sc["name"], "role": "Titular (90m)", "fit": h_sc.get("fit", 97), "note": f"Pateador de penales de {home_name} en Betano" },
+                        { "name": h_card["name"], "role": "Titular (90m)", "fit": h_card.get("fit", 94), "note": f"Zaguero titular; riesgo de amonestación táctica" }
                     ]
                   },
                   "away": {
                     "lineupStatus": "PLANTILLA TITULAR",
-                    "rotationReason": "Alineación base confirmada.",
+                    "rotationReason": f"Alineación base de {away_name} confirmada.",
                     "players": [
-                        { "name": f"Goleador {away_name}", "role": "Titular (90m)", "fit": 95, "note": "Rematador de área" },
-                        { "name": f"Central {away_name}", "role": "Titular", "fit": 91, "note": "Propenso a tarjeta por corte táctico" }
+                        { "name": a_sc["name"], "role": "Titular (90m)", "fit": a_sc.get("fit", 95), "note": f"Referente ofensivo de {away_name} en Betano" },
+                        { "name": a_card["name"], "role": "Titular (90m)", "fit": a_card.get("fit", 91), "note": f"Marcador de choque; propenso a amonestación" }
                     ]
                   }
                 },
