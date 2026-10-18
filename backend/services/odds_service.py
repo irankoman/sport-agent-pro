@@ -10,6 +10,7 @@ Motor de Cuotas en Tiempo Real Calibrado a Betano y Casas de Apuestas Reales
 """
 import time
 import math
+import re
 import requests
 from typing import Dict, Any, Optional, Tuple
 import logging
@@ -128,6 +129,185 @@ class LiveOddsBetanoEngine:
         return None
 
     @classmethod
+    def parse_live_minute(cls, clock_str: Any) -> int:
+        """
+        Convierte de forma blindada el reloj de la API (ej. '45+2\'', 'HT', '1T', '89\'', 64)
+        a un entero de minutos jugados entre 1 y 90.
+        """
+        try:
+            if clock_str is None:
+                return 45
+            if isinstance(clock_str, (int, float)):
+                return max(1, min(90, int(clock_str)))
+            s = str(clock_str).strip().upper()
+            if not s:
+                return 45
+            if "HT" in s or "DESCANSO" in s or "ENTRETIEMPO" in s or "HALF" in s:
+                return 45
+            if s in ("1T", "1H"):
+                return 25
+            if s in ("2T", "2H"):
+                return 65
+            # Caso '90+3' o '45+2'
+            plus_match = re.search(r"(\d+)\s*\+\s*(\d+)", s)
+            if plus_match:
+                base_m = int(plus_match.group(1))
+                extra_m = int(plus_match.group(2))
+                if base_m == 45:
+                    return 45
+                return max(1, min(90, base_m + min(extra_m, 5)))
+            # Caso '64\'' o '89:12'
+            num_match = re.search(r"(\d+)", s)
+            if num_match:
+                return max(1, min(90, int(num_match.group(1))))
+            return 45
+        except Exception:
+            return 45
+
+    @classmethod
+    def parse_live_score(cls, home_score: Any, away_score: Any) -> Tuple[int, int]:
+        """Convierte marcadores a enteros de forma segura."""
+        try:
+            h = int(str(home_score).strip()) if home_score not in (None, "-", "") else 0
+        except Exception:
+            h = 0
+        try:
+            a = int(str(away_score).strip()) if away_score not in (None, "-", "") else 0
+        except Exception:
+            a = 0
+        return max(0, h), max(0, a)
+
+    @classmethod
+    def calculate_inplay_odds(
+        cls,
+        base_odds: Dict[str, Any],
+        home_score: Any,
+        away_score: Any,
+        clock_str: Any
+    ) -> Dict[str, Any]:
+        """
+        Recalcula dinámicamente las cuotas 1, X, 2 y Over/Under en vivo usando
+        un modelo de Poisson de tiempo restante con margen comercial Betano (~6%).
+        Conserva intactas las cuotas pre-partido en pre_* para referencia y props.
+        """
+        out = dict(base_odds)
+        try:
+            pre_h = float(base_odds.get("pre_home_win_odds") or base_odds.get("home_win_odds") or 1.85)
+            pre_d = float(base_odds.get("pre_draw_odds") or base_odds.get("draw_odds") or 3.50)
+            pre_a = float(base_odds.get("pre_away_win_odds") or base_odds.get("away_win_odds") or 4.00)
+            pre_over = float(base_odds.get("pre_over_goals_odds") or base_odds.get("over_goals_odds") or 1.82)
+            pre_under = float(base_odds.get("pre_under_goals_odds") or base_odds.get("under_goals_odds") or 1.98)
+            pre_line = float(base_odds.get("pre_goals_line") or base_odds.get("goals_line") or 2.5)
+
+            out["pre_home_win_odds"] = round(pre_h, 2)
+            out["pre_draw_odds"] = round(pre_d, 2)
+            out["pre_away_win_odds"] = round(pre_a, 2)
+            out["pre_over_goals_odds"] = round(pre_over, 2)
+            out["pre_under_goals_odds"] = round(pre_under, 2)
+            out["pre_goals_line"] = pre_line
+
+            cur_min = cls.parse_live_minute(clock_str)
+            h_goals, a_goals = cls.parse_live_score(home_score, away_score)
+            rem_mins = max(1.5, 90.0 - float(cur_min) + 2.5)  # incluye descuento medio (~2.5m)
+            rem_ratio = max(0.02, min(1.0, rem_mins / 92.5))
+
+            lam_h_full = float(base_odds.get("lambda_home") or 1.45)
+            lam_a_full = float(base_odds.get("lambda_away") or 1.15)
+
+            lam_h_rem = max(0.03, lam_h_full * rem_ratio)
+            lam_a_rem = max(0.03, lam_a_full * rem_ratio)
+
+            # Distribución de Poisson truncada para goles restantes (0..8)
+            max_g = 8
+            probs_h = [math.exp(-lam_h_rem) * (lam_h_rem ** k) / math.factorial(k) for k in range(max_g + 1)]
+            probs_a = [math.exp(-lam_a_rem) * (lam_a_rem ** k) / math.factorial(k) for k in range(max_g + 1)]
+
+            p_home = 0.0
+            p_draw = 0.0
+            p_away = 0.0
+            for gh in range(max_g + 1):
+                for ga in range(max_g + 1):
+                    p = probs_h[gh] * probs_a[ga]
+                    tot_h = h_goals + gh
+                    tot_a = a_goals + ga
+                    if tot_h > tot_a:
+                        p_home += p
+                    elif tot_h == tot_a:
+                        p_draw += p
+                    else:
+                        p_away += p
+
+            # Suavizado de incertidumbre en vivo (evita probabilidades de 0 absoluto o 100% irreal)
+            # En minutos finales o con ventaja, las casas mantienen una prima de riesgo/liquidez
+            uncertainty = 0.035 + 0.045 * rem_ratio
+            p_home = p_home * (1.0 - uncertainty) + (1.0 / pre_h) * (uncertainty * 0.45)
+            p_draw = p_draw * (1.0 - uncertainty) + (1.0 / pre_d) * (uncertainty * 0.35)
+            p_away = p_away * (1.0 - uncertainty) + (1.0 / pre_a) * (uncertainty * 0.45)
+
+            total_p = max(0.001, p_home + p_draw + p_away)
+            p_home /= total_p
+            p_draw /= total_p
+            p_away /= total_p
+
+            # Margen comercial Betano In-Play (~6%)
+            margin = 1.06
+            # Ajuste fino para que ventajas de 1 gol al 88-89' den @1.04-@1.08 y ventajas de 2 goles al 64' den @1.08-@1.14
+            diff = h_goals - a_goals
+            if diff > 0:
+                lead_floor = 1.04 if (cur_min >= 85 or diff >= 3) else (1.08 if diff >= 2 and cur_min >= 55 else 1.02)
+                raw_h = max(lead_floor, round(1.0 / min(0.955, p_home * (1.02 if diff == 1 else 1.0)), 2))
+                draw_prob_eff = max(0.088 if (diff == 1 and cur_min >= 80) else 0.035, p_draw * margin)
+                away_prob_eff = max(0.029 if (diff == 1 and cur_min >= 80) else 0.022, p_away * margin)
+                raw_d = max(1.10, min(29.00, round(1.0 / draw_prob_eff, 2)))
+                raw_a = max(1.20, min(45.00, round(1.0 / away_prob_eff, 2)))
+            elif diff < 0:
+                abs_diff = abs(diff)
+                lead_floor = 1.04 if (cur_min >= 85 or abs_diff >= 3) else (1.08 if abs_diff >= 2 and cur_min >= 55 else 1.02)
+                raw_a = max(lead_floor, round(1.0 / min(0.955, p_away * (1.02 if abs_diff == 1 else 1.0)), 2))
+                draw_prob_eff = max(0.088 if (abs_diff == 1 and cur_min >= 80) else 0.035, p_draw * margin)
+                home_prob_eff = max(0.029 if (abs_diff == 1 and cur_min >= 80) else 0.022, p_home * margin)
+                raw_d = max(1.10, min(29.00, round(1.0 / draw_prob_eff, 2)))
+                raw_h = max(1.20, min(45.00, round(1.0 / home_prob_eff, 2)))
+            else:
+                raw_h = max(1.15, min(35.00, round(1.0 / max(0.028, p_home * margin), 2)))
+                raw_d = max(1.08, min(15.00, round(1.0 / max(0.065, p_draw * margin), 2)))
+                raw_a = max(1.15, min(35.00, round(1.0 / max(0.028, p_away * margin), 2)))
+
+            # Recalcular línea dinámica de Over/Under según goles actuales + esperados restantes
+            current_total_goals = h_goals + a_goals
+            rem_total_lam = lam_h_rem + lam_a_rem
+            live_line = max(pre_line, float(current_total_goals) + 0.5)
+            # Probabilidad de al menos 1 gol más (para línea actual + 0.5)
+            need_goals = max(1, int(math.floor(live_line - current_total_goals + 1)))
+            p_under_rem = sum(
+                math.exp(-rem_total_lam) * (rem_total_lam ** k) / math.factorial(k)
+                for k in range(need_goals)
+            )
+            p_over_rem = max(0.04, min(0.94, 1.0 - p_under_rem))
+            p_under_rem = max(0.04, min(0.94, p_under_rem))
+
+            live_over_odds = max(1.06, min(15.00, round(1.0 / (p_over_rem * margin), 2)))
+            live_under_odds = max(1.05, min(15.00, round(1.0 / (p_under_rem * margin), 2)))
+
+            is_suspended = bool(cur_min >= 89)
+
+            out["home_win_odds"] = raw_h
+            out["draw_odds"] = raw_d
+            out["away_win_odds"] = raw_a
+            out["over_goals_odds"] = live_over_odds
+            out["under_goals_odds"] = live_under_odds
+            out["goals_line"] = live_line
+            out["is_live_odds"] = True
+            out["live_minute"] = cur_min
+            out["is_market_suspended"] = is_suspended
+            out["model_prob"] = min(98, max(5, int(round(p_home * 100))))
+            out["market_badge"] = "⚡ Cuota En Vivo (In-Play Betano)"
+            out["source"] = "⚡ Cuota En Vivo (In-Play Betano)"
+        except Exception as e:
+            logger.warning(f"[LiveOddsBetanoEngine] Error en calculate_inplay_odds: {e}")
+        return out
+
+    @classmethod
     def extract_or_calculate_odds(
         cls,
         comp: Dict[str, Any],
@@ -135,20 +315,28 @@ class LiveOddsBetanoEngine:
         away_name: str,
         referee_stats: Any,
         league_code: str = "",
-        event_id: str = ""
+        event_id: str = "",
+        is_live: bool = False,
+        home_score: Any = 0,
+        away_score: Any = 0,
+        clock: str = ""
     ) -> Dict[str, Any]:
         """
         Extrae cuotas reales si están disponibles en la competición (moneyline, over/under)
         o calcula dinámicamente las líneas de Betano con margen comercial real (Poisson + Overround).
+        Si el partido está EN VIVO (is_live=True), recalcula dinámicamente las cuotas In-Play
+        según el marcador actual y los minutos restantes.
         """
         cache_key = f"{league_code}_{event_id}_{home_name}_{away_name}"
         now = time.time()
         
-        # 1. Comprobar caché en memoria (TTL de 20 minutos)
+        # 1. Comprobar caché en memoria de la base pre-partido (TTL de 20 minutos)
         if cache_key in cls._ODDS_CACHE:
             ts, cached_data = cls._ODDS_CACHE[cache_key]
             if (now - ts) < cls._CACHE_TTL_SECONDS:
-                return cached_data
+                if is_live:
+                    return cls.calculate_inplay_odds(cached_data, home_score, away_score, clock)
+                return dict(cached_data)
 
         has_live_book = False
         parsed_live: Optional[Dict[str, Any]] = None
@@ -249,6 +437,15 @@ class LiveOddsBetanoEngine:
             "over_goals_odds": over_goals_odds,
             "under_goals_odds": under_goals_odds,
             "goals_line": goals_line,
+            "pre_home_win_odds": home_win_odds,
+            "pre_draw_odds": draw_odds,
+            "pre_away_win_odds": away_win_odds,
+            "pre_over_goals_odds": over_goals_odds,
+            "pre_under_goals_odds": under_goals_odds,
+            "pre_goals_line": goals_line,
+            "is_live_odds": False,
+            "live_minute": 0,
+            "is_market_suspended": False,
             "card_market": card_market,
             "card_odds": card_odds,
             "card_prob": card_prob,
@@ -265,9 +462,11 @@ class LiveOddsBetanoEngine:
             "last_sync": time.strftime("%H:%M:%S")
         }
 
-        # Guardar en caché
+        # Guardar base pre-partido en caché
         cls._ODDS_CACHE[cache_key] = (now, result)
-        return result
+        if is_live:
+            return cls.calculate_inplay_odds(result, home_score, away_score, clock)
+        return dict(result)
 
     # -------------------------------------------------------------------------
     # CALIBRACIÓN DE PLAYER PROPS (GOLEADORES & AMARILLAS) ESTILO BETANO

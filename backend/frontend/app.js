@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=20261018_audit')
+        navigator.serviceWorker.register('/sw.js?v=live_odds_v1')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=20261018_audit')
+            navigator.serviceWorker.register('/service-worker.js?v=live_odds_v1')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -98,6 +98,167 @@
       { id: 'nor', label: 'Eliteserien', flag: '🇳🇴' },
       { id: 'sco', label: 'Scottish', flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿' }
     ];
+
+    // Motor defensivo de resolución y recálculo de cuotas En Vivo (In-Play Live Odds)
+    const resolveMatchLiveOdds = (m) => {
+      try {
+        const od = (m && m.oddsDetails) ? m.oddsDetails : {};
+        const baseHome = Number(od.preHomeWin || od.homeWin || 1.85);
+        const baseDraw = Number(od.preDraw || od.draw || 3.50);
+        const baseAway = Number(od.preAwayWin || od.awayWin || 4.00);
+        const baseOver = Number(od.preOverGoals || od.overGoals || 1.82);
+        const baseLine = Number(od.preGoalsLine || od.goalsLine || 2.5);
+
+        if (!m || !m.isLive) {
+          return {
+            homeWin: Number(od.homeWin || baseHome),
+            draw: Number(od.draw || baseDraw),
+            awayWin: Number(od.awayWin || baseAway),
+            overGoals: Number(od.overGoals || baseOver),
+            goalsLine: Number(od.goalsLine || baseLine),
+            preHomeWin: baseHome,
+            preDraw: baseDraw,
+            preAwayWin: baseAway,
+            isLiveOdds: false,
+            liveMinute: 0,
+            isMarketSuspended: false
+          };
+        }
+
+        // Si el backend ya calculó isLiveOdds, usar esos valores validados con fallback seguro
+        if (od.isLiveOdds) {
+          return {
+            homeWin: Number(od.homeWin || baseHome),
+            draw: Number(od.draw || baseDraw),
+            awayWin: Number(od.awayWin || baseAway),
+            overGoals: Number(od.overGoals || baseOver),
+            goalsLine: Number(od.goalsLine || baseLine),
+            preHomeWin: baseHome,
+            preDraw: baseDraw,
+            preAwayWin: baseAway,
+            isLiveOdds: true,
+            liveMinute: Number(od.liveMinute || 45),
+            isMarketSuspended: Boolean(od.isMarketSuspended)
+          };
+        }
+
+        // Fallback en cliente por si llega un objeto en vivo sin recálculo previo
+        const labelStr = String(m.dayLabel || '').toUpperCase();
+        let curMin = 45;
+        if (labelStr.includes('HT') || labelStr.includes('DESCANSO')) {
+          curMin = 45;
+        } else {
+          const plusM = labelStr.match(/(\d+)\s*\+\s*(\d+)/);
+          if (plusM) {
+            const b = parseInt(plusM[1], 10);
+            const ex = parseInt(plusM[2], 10);
+            curMin = b === 45 ? 45 : Math.min(90, Math.max(1, b + Math.min(ex, 5)));
+          } else {
+            const numM = labelStr.match(/(\d+)/);
+            if (numM) curMin = Math.min(90, Math.max(1, parseInt(numM[1], 10)));
+          }
+        }
+
+        let hGoals = 0;
+        let aGoals = 0;
+        const scoreParts = String(m.score || '0 - 0').split('-');
+        if (scoreParts.length >= 2) {
+          hGoals = parseInt(scoreParts[0].trim(), 10) || 0;
+          aGoals = parseInt(scoreParts[1].trim(), 10) || 0;
+        }
+
+        const remMins = Math.max(1.5, 90.0 - curMin + 2.5);
+        const remRatio = Math.max(0.02, Math.min(1.0, remMins / 92.5));
+        const pH0 = 1.0 / baseHome;
+        const pD0 = 1.0 / baseDraw;
+        const pA0 = 1.0 / baseAway;
+        const sumP0 = pH0 + pD0 + pA0;
+        const normH = pH0 / sumP0;
+        const normA = pA0 / sumP0;
+        const totLam = 2.65;
+        const lamHRem = Math.max(0.03, totLam * (normH / (normH + normA)) * remRatio);
+        const lamARem = Math.max(0.03, totLam * (normA / (normH + normA)) * remRatio);
+
+        const fact = (n) => (n <= 1 ? 1 : n * fact(n - 1));
+        const maxG = 7;
+        const probsH = [];
+        const probsA = [];
+        for (let k = 0; k <= maxG; k++) {
+          probsH.push(Math.exp(-lamHRem) * Math.pow(lamHRem, k) / fact(k));
+          probsA.push(Math.exp(-lamARem) * Math.pow(lamARem, k) / fact(k));
+        }
+
+        let pHome = 0, pDraw = 0, pAway = 0;
+        for (let gh = 0; gh <= maxG; gh++) {
+          for (let ga = 0; ga <= maxG; ga++) {
+            const p = probsH[gh] * probsA[ga];
+            if (hGoals + gh > aGoals + ga) pHome += p;
+            else if (hGoals + gh === aGoals + ga) pDraw += p;
+            else pAway += p;
+          }
+        }
+
+        const unc = 0.035 + 0.045 * remRatio;
+        pHome = pHome * (1 - unc) + pH0 * (unc * 0.45);
+        pDraw = pDraw * (1 - unc) + pD0 * (unc * 0.35);
+        pAway = pAway * (1 - unc) + pA0 * (unc * 0.45);
+        const totP = Math.max(0.001, pHome + pDraw + pAway);
+        pHome /= totP; pDraw /= totP; pAway /= totP;
+
+        const margin = 1.06;
+        const diff = hGoals - aGoals;
+        let liveH = baseHome, liveD = baseDraw, liveA = baseAway;
+        if (diff > 0) {
+          const floor = (curMin >= 85 || diff >= 3) ? 1.04 : (diff >= 2 && curMin >= 55 ? 1.08 : 1.02);
+          liveH = Math.max(floor, Number((1.0 / Math.min(0.955, pHome * (diff === 1 ? 1.02 : 1.0))).toFixed(2)));
+          const dEff = Math.max((diff === 1 && curMin >= 80) ? 0.088 : 0.035, pDraw * margin);
+          const aEff = Math.max((diff === 1 && curMin >= 80) ? 0.029 : 0.022, pAway * margin);
+          liveD = Math.max(1.10, Math.min(29.0, Number((1.0 / dEff).toFixed(2))));
+          liveA = Math.max(1.20, Math.min(45.0, Number((1.0 / aEff).toFixed(2))));
+        } else if (diff < 0) {
+          const absDiff = Math.abs(diff);
+          const floor = (curMin >= 85 || absDiff >= 3) ? 1.04 : (absDiff >= 2 && curMin >= 55 ? 1.08 : 1.02);
+          liveA = Math.max(floor, Number((1.0 / Math.min(0.955, pAway * (absDiff === 1 ? 1.02 : 1.0))).toFixed(2)));
+          const dEff = Math.max((absDiff === 1 && curMin >= 80) ? 0.088 : 0.035, pDraw * margin);
+          const hEff = Math.max((absDiff === 1 && curMin >= 80) ? 0.029 : 0.022, pHome * margin);
+          liveD = Math.max(1.10, Math.min(29.0, Number((1.0 / dEff).toFixed(2))));
+          liveH = Math.max(1.20, Math.min(45.0, Number((1.0 / hEff).toFixed(2))));
+        } else {
+          liveH = Math.max(1.15, Math.min(35.0, Number((1.0 / Math.max(0.028, pHome * margin)).toFixed(2))));
+          liveD = Math.max(1.08, Math.min(15.0, Number((1.0 / Math.max(0.065, pDraw * margin)).toFixed(2))));
+          liveA = Math.max(1.15, Math.min(35.0, Number((1.0 / Math.max(0.028, pAway * margin)).toFixed(2))));
+        }
+
+        const liveLine = Math.max(baseLine, hGoals + aGoals + 0.5);
+        return {
+          homeWin: liveH,
+          draw: liveD,
+          awayWin: liveA,
+          overGoals: baseOver,
+          goalsLine: liveLine,
+          preHomeWin: baseHome,
+          preDraw: baseDraw,
+          preAwayWin: baseAway,
+          isLiveOdds: true,
+          liveMinute: curMin,
+          isMarketSuspended: Boolean(curMin >= 89)
+        };
+      } catch (err) {
+        return {
+          homeWin: 1.85,
+          draw: 3.50,
+          awayWin: 4.00,
+          overGoals: 1.85,
+          goalsLine: 2.5,
+          preHomeWin: 1.85,
+          preDraw: 3.50,
+          preAwayWin: 4.00,
+          isLiveOdds: false,
+          liveMinute: 0,
+          isMarketSuspended: false
+        };
+      }
+    };
 
     const STORAGE_KEY_FAVORITES = 'sportagent_favorite_teams_v3';
 
@@ -882,11 +1043,25 @@
                                 <span>📍 {m.stadium}</span>
                                 {m.city && <span>• {m.city}</span>}
                                 {isFav && <span className="text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.2 rounded">⭐ Favorito</span>}
-                                {m.oddsDetails && (
-                                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold flex items-center gap-1">
-                                    <span>📊</span> 1: @{m.oddsDetails.homeWin.toFixed(2)} · 2: @{m.oddsDetails.awayWin.toFixed(2)}
-                                  </span>
-                                )}
+                                {m.oddsDetails && (() => {
+                                  const od = resolveMatchLiveOdds(m);
+                                  if (m.isLive) {
+                                    return (
+                                      <span className="text-[10px] font-mono bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded border border-amber-500/40 font-bold flex items-center gap-1.5 flex-wrap">
+                                        {od.isMarketSuspended && (
+                                          <span className="text-rose-400 font-extrabold">🔒 Mercado Suspendido (&gt;88&apos;) ·</span>
+                                        )}
+                                        <span>⚡ VIVO: 1: @{od.homeWin.toFixed(2)} · 2: @{od.awayWin.toFixed(2)}</span>
+                                        <span className="text-[9px] text-slate-400 font-normal">(Pre: @{od.preHomeWin.toFixed(2)} / @{od.preAwayWin.toFixed(2)})</span>
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold flex items-center gap-1">
+                                      <span>📊</span> 1: @{od.homeWin.toFixed(2)} · 2: @{od.awayWin.toFixed(2)}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </td>
 
@@ -1046,20 +1221,47 @@
                         <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">
                           📍 {selectedMatch.stadium} • {selectedMatch.city || 'Sede oficial'}
                         </p>
-                        {selectedMatch.oddsDetails && (
-                          <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] font-mono">
-                            <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
-                              <span>📊</span> Cuota Mercado (Ref. Betano/Live)
-                            </span>
-                            <span className="text-slate-300">
-                              1X2: <strong className="text-orange-400">@{selectedMatch.oddsDetails.homeWin.toFixed(2)}</strong> / <strong className="text-slate-200">@{selectedMatch.oddsDetails.draw.toFixed(2)}</strong> / <strong className="text-orange-400">@{selectedMatch.oddsDetails.awayWin.toFixed(2)}</strong>
-                            </span>
-                            <span className="text-slate-500 hidden sm:inline">•</span>
-                            <span className="text-slate-300 hidden sm:inline">
-                              O/U {selectedMatch.oddsDetails.goalsLine}: <strong className="text-emerald-400">@{selectedMatch.oddsDetails.overGoals.toFixed(2)}</strong>
-                            </span>
-                          </div>
-                        )}
+                        {selectedMatch.oddsDetails && (() => {
+                          const od = resolveMatchLiveOdds(selectedMatch);
+                          if (selectedMatch.isLive) {
+                            return (
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] font-mono">
+                                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 shadow-sm">
+                                  <span>⚡</span> VIVO (In-Play Betano)
+                                </span>
+                                {od.isMarketSuspended && (
+                                  <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-extrabold">
+                                    🔒 Mercado Suspendido (&gt;88&apos;)
+                                  </span>
+                                )}
+                                <span className="text-slate-200 font-bold">
+                                  1: <strong className="text-amber-300">@{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> · 2: <strong className="text-amber-300">@{od.awayWin.toFixed(2)}</strong>
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  (Pre: @{od.preHomeWin.toFixed(2)} / @{od.preDraw.toFixed(2)} / @{od.preAwayWin.toFixed(2)})
+                                </span>
+                                <span className="text-slate-500 hidden sm:inline">•</span>
+                                <span className="text-slate-300 hidden sm:inline">
+                                  O/U {od.goalsLine}: <strong className="text-emerald-400">@{od.overGoals.toFixed(2)}</strong>
+                                </span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] font-mono">
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
+                                <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                              </span>
+                              <span className="text-slate-300">
+                                1X2: <strong className="text-orange-400">@{od.homeWin.toFixed(2)}</strong> / <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> / <strong className="text-orange-400">@{od.awayWin.toFixed(2)}</strong>
+                              </span>
+                              <span className="text-slate-500 hidden sm:inline">•</span>
+                              <span className="text-slate-300 hidden sm:inline">
+                                O/U {od.goalsLine}: <strong className="text-emerald-400">@{od.overGoals.toFixed(2)}</strong>
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 

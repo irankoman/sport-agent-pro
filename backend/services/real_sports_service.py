@@ -586,7 +586,11 @@ class RealSportsService:
                 away_name=away_name,
                 referee_stats=ref_stats,
                 league_code=espn_league_code,
-                event_id=espn_event_id
+                event_id=espn_event_id,
+                is_live=is_live,
+                home_score=home_score,
+                away_score=away_score,
+                clock=clock if is_live else ""
             )
 
             p1_id = f"{ev_id}_p1"
@@ -663,7 +667,7 @@ class RealSportsService:
                 "city": city,
                 "starred": False,
                 "oddsSource": odds_data.get("source", "📊 Cuota Mercado (Ref. Betano/Live)"),
-                "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)",
+                "marketBadge": odds_data.get("market_badge", "📊 Cuota Mercado (Ref. Betano/Live)"),
                 "syncTimestamp": odds_data.get("last_sync", "Reciente"),
                 "oddsDetails": {
                     "homeWin": odds_data["home_win_odds"],
@@ -672,6 +676,15 @@ class RealSportsService:
                     "overGoals": odds_data["over_goals_odds"],
                     "underGoals": odds_data.get("under_goals_odds", 1.95),
                     "goalsLine": odds_data["goals_line"],
+                    "isLiveOdds": odds_data.get("is_live_odds", False),
+                    "liveMinute": odds_data.get("live_minute", 0),
+                    "isMarketSuspended": odds_data.get("is_market_suspended", False),
+                    "preHomeWin": odds_data.get("pre_home_win_odds", odds_data["home_win_odds"]),
+                    "preDraw": odds_data.get("pre_draw_odds", odds_data["draw_odds"]),
+                    "preAwayWin": odds_data.get("pre_away_win_odds", odds_data["away_win_odds"]),
+                    "preOverGoals": odds_data.get("pre_over_goals_odds", odds_data["over_goals_odds"]),
+                    "preUnderGoals": odds_data.get("pre_under_goals_odds", odds_data.get("under_goals_odds", 1.95)),
+                    "preGoalsLine": odds_data.get("pre_goals_line", odds_data["goals_line"]),
                     "provider": odds_data.get("provider", "Betano / Mercado Real")
                 },
                 "lineupSummary": {

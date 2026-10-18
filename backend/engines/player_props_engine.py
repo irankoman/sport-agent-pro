@@ -34,8 +34,8 @@ class PlayerPropsEngine:
         odds_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         odds_data = odds_data or {}
-        home_win_odds = odds_data.get("home_win_odds", 1.85)
-        away_win_odds = odds_data.get("away_win_odds", 3.80)
+        home_win_odds = odds_data.get("pre_home_win_odds") or odds_data.get("home_win_odds", 1.85)
+        away_win_odds = odds_data.get("pre_away_win_odds") or odds_data.get("away_win_odds", 3.80)
 
         # Extracción 100% en vivo desde ESPN API: verificación estricta de starter: true en summary
         home_roster = MultiSourceRosterEngine.get_live_roster(home_name, league_code, home_team_id, event_id=fixture_id)
