@@ -87,19 +87,24 @@
       { id: 'sco', label: 'Scottish', flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿' }
     ];
 
-    // Equipos favoritos iniciales solicitados por el usuario
-    const DEFAULT_VIP_NAMES = [
-      'Colo-Colo',
-      'Universidad de Chile',
-      'Arsenal',
-      'Real Madrid',
-      'Internazionale',
-      'Inter de Milán',
-      'Inter',
-      'Bayer Leverkusen',
-      'Celtic',
-      'Bodø/Glimt'
-    ];
+    const STORAGE_KEY_FAVORITES = 'sportagent_favorite_teams_v3';
+
+    // Cargar selecciones manuales guardadas en localStorage (Sin equipos fijos por código)
+    const loadSavedFavorites = () => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY_FAVORITES);
+        if (saved !== null) {
+          return JSON.parse(saved);
+        }
+        const legacy = localStorage.getItem('sportagent_vip_teams_v10');
+        if (legacy !== null) {
+          return JSON.parse(legacy);
+        }
+      } catch (e) {
+        console.error("Error leyendo favoritos de localStorage:", e);
+      }
+      return [];
+    };
 
     // Helper para detectar partidos finalizados de forma inteligente
     const isFinishedMatch = (m) => {
@@ -123,22 +128,8 @@
       const [onlyLive, setOnlyLive] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
 
-      // Equipos VIP Favoritos (Persistidos)
-      const [vipTeams, setVipTeams] = useState(() => {
-        const saved = localStorage.getItem('sportagent_vip_teams_v10');
-        return saved ? JSON.parse(saved) : DEFAULT_VIP_NAMES;
-      });
-
-      // Sobrescrituras manuales de estrellas por partido (Persistidos)
-      const [customStarredIds, setCustomStarredIds] = useState(() => {
-        const saved = localStorage.getItem('sportagent_custom_starred_v2');
-        return saved ? JSON.parse(saved) : [];
-      });
-
-      const [customUnstarredIds, setCustomUnstarredIds] = useState(() => {
-        const saved = localStorage.getItem('sportagent_custom_unstarred_v2');
-        return saved ? JSON.parse(saved) : [];
-      });
+      // Equipos Favoritos / VIP seleccionados manualmente por el usuario (Persistidos en localStorage)
+      const [vipTeams, setVipTeams] = useState(loadSavedFavorites);
 
       // 158 Equipos reales para selector VIP
       const [allTeamsData, setAllTeamsData] = useState({});
@@ -201,53 +192,67 @@
         bankrollProtected: true
       });
 
-      // Guardar en localStorage
+      // Guardar inmediatamente en localStorage cada cambio de Favoritos/VIP por nombre de club
       useEffect(() => {
-        localStorage.setItem('sportagent_vip_teams_v10', JSON.stringify(vipTeams));
+        try {
+          localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(vipTeams));
+          localStorage.setItem('sportagent_vip_teams_v10', JSON.stringify(vipTeams));
+        } catch (e) {
+          console.error("Error guardando favoritos en localStorage:", e);
+        }
       }, [vipTeams]);
 
-      useEffect(() => {
-        localStorage.setItem('sportagent_custom_starred_v2', JSON.stringify(customStarredIds));
-      }, [customStarredIds]);
-
-      useEffect(() => {
-        localStorage.setItem('sportagent_custom_unstarred_v2', JSON.stringify(customUnstarredIds));
-      }, [customUnstarredIds]);
-
-      // Función de coincidencia con equipos VIP
+      // Función de coincidencia con equipos Favoritos/VIP por nombre
       const matchesVipTeam = (m, teamsList) => {
         if (!m || !teamsList || teamsList.length === 0) return false;
-        const h = (m.homeTeam || '').toLowerCase();
-        const a = (m.awayTeam || '').toLowerCase();
+        const h = (m.homeTeam || '').toLowerCase().trim();
+        const a = (m.awayTeam || '').toLowerCase().trim();
         return teamsList.some(vip => {
           if (!vip) return false;
           const v = vip.toLowerCase().trim();
-          return h.includes(v) || v.includes(h) || a.includes(v) || v.includes(a);
+          return h === v || a === v || h.includes(v) || v.includes(h) || a.includes(v) || v.includes(a);
         });
       };
 
-      // Determinar si un partido es Favorito / Importante bajo control del usuario
+      // Determinar si un partido es Favorito / Importante bajo control manual del usuario
       const isMatchFavorite = (m) => {
         if (!m) return false;
-        if (customUnstarredIds.includes(m.id)) return false;
-        if (customStarredIds.includes(m.id)) return true;
         return matchesVipTeam(m, vipTeams);
       };
 
-      // Alternar estrella manual en cualquier partido
+      // Alternar estrella manual en cualquier partido: guarda por NOMBRE del equipo permanentemente en localStorage
       const toggleStar = (id, e) => {
         if (e) e.stopPropagation();
         const match = matches.find(m => m.id === id);
         if (!match) return;
 
+        const h = (match.homeTeam || '').trim();
+        const a = (match.awayTeam || '').trim();
         const currentlyFav = isMatchFavorite(match);
-        if (currentlyFav) {
-          setCustomStarredIds(prev => prev.filter(x => x !== id));
-          setCustomUnstarredIds(prev => prev.includes(id) ? prev : [...prev, id]);
-        } else {
-          setCustomUnstarredIds(prev => prev.filter(x => x !== id));
-          setCustomStarredIds(prev => prev.includes(id) ? prev : [...prev, id]);
-        }
+
+        setVipTeams(prev => {
+          let next;
+          if (currentlyFav) {
+            // Desmarcar: remover los nombres de equipos que coincidan
+            next = prev.filter(t => {
+              const tn = t.toLowerCase().trim();
+              const matchesH = tn === h.toLowerCase() || h.toLowerCase().includes(tn) || tn.includes(h.toLowerCase());
+              const matchesA = tn === a.toLowerCase() || a.toLowerCase().includes(tn) || tn.includes(a.toLowerCase());
+              return !matchesH && !matchesA;
+            });
+          } else {
+            // Marcar: agregar los nombres de ambos equipos de forma permanente
+            const toAdd = [];
+            if (h && !prev.some(t => t.toLowerCase().trim() === h.toLowerCase())) toAdd.push(h);
+            if (a && !prev.some(t => t.toLowerCase().trim() === a.toLowerCase())) toAdd.push(a);
+            next = [...prev, ...toAdd];
+          }
+          try {
+            localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
+            localStorage.setItem('sportagent_vip_teams_v10', JSON.stringify(next));
+          } catch(err) {}
+          return next;
+        });
       };
 
       const closeMatchDetail = () => {
@@ -376,7 +381,7 @@
       // Conteo de partidos favoritos activos
       const favoriteMatchesCount = useMemo(() => {
         return matches.filter(m => isMatchFavorite(m)).length;
-      }, [matches, vipTeams, customStarredIds, customUnstarredIds]);
+      }, [matches, vipTeams]);
 
       // Filtrado reactivo de partidos
       const filteredMatches = useMemo(() => {
@@ -397,7 +402,7 @@
           }
           return true;
         });
-      }, [matches, selectedDay, selectedLeague, onlyStarred, onlyLive, searchQuery, vipTeams, customStarredIds, customUnstarredIds]);
+      }, [matches, selectedDay, selectedLeague, onlyStarred, onlyLive, searchQuery, vipTeams]);
 
       const applyRiskProfile = (profileKey) => {
         if (!selectedMatch) return;
@@ -439,12 +444,18 @@
       };
 
       const toggleVipTeam = (teamName) => {
+        const cleanName = (teamName || '').trim();
+        if (!cleanName) return;
         setVipTeams((prev) => {
-          if (prev.includes(teamName)) {
-            return prev.filter(t => t !== teamName);
-          } else {
-            return [...prev, teamName];
-          }
+          const exists = prev.some(t => t.toLowerCase().trim() === cleanName.toLowerCase());
+          const next = exists
+            ? prev.filter(t => t.toLowerCase().trim() !== cleanName.toLowerCase())
+            : [...prev, cleanName];
+          try {
+            localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
+            localStorage.setItem('sportagent_vip_teams_v10', JSON.stringify(next));
+          } catch(err) {}
+          return next;
         });
       };
 
@@ -2502,7 +2513,7 @@
                 {/* Lista de equipos */}
                 <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[380px]">
                   {flatTeamsList.map((t, idx) => {
-                    const isVip = vipTeams.includes(t.name);
+                    const isVip = vipTeams.some(vt => vt.toLowerCase().trim() === t.name.toLowerCase().trim());
                     return (
                       <div
                         key={idx}
@@ -2530,11 +2541,29 @@
                   })}
                 </div>
 
-                <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
-                  <span className="text-slate-400">Total VIP seleccionados: <strong className="text-amber-400">{vipTeams.length}</strong></span>
+                <div className="pt-3 border-t border-slate-800 flex flex-wrap justify-between items-center gap-2 text-xs">
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-400">Total Favoritos: <strong className="text-amber-400">{vipTeams.length}</strong></span>
+                    {vipTeams.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (confirm("¿Deseas desmarcar todos los equipos favoritos?")) {
+                            setVipTeams([]);
+                            try {
+                              localStorage.setItem(STORAGE_KEY_FAVORITES, '[]');
+                              localStorage.setItem('sportagent_vip_teams_v10', '[]');
+                            } catch(e) {}
+                          }
+                        }}
+                        className="text-[11px] text-rose-400 hover:text-rose-300 underline transition cursor-pointer"
+                      >
+                        Limpiar lista
+                      </button>
+                    )}
+                  </div>
                   <button
                     onClick={() => setShowVipModal(false)}
-                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-1.5 rounded-xl shadow transition"
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-4 py-1.5 rounded-xl shadow transition"
                   >
                     Guardar y Cerrar
                   </button>

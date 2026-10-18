@@ -10,7 +10,7 @@ Integra 6 módulos avanzados para la Sub-Ventana de Detalle:
 """
 import hashlib
 from typing import Dict, Any, List
-from backend.data.team_rosters import get_team_roster
+from backend.data.team_rosters import get_team_roster, get_team_goalkeeper
 
 class DeepStatsEngine:
     @classmethod
@@ -98,6 +98,8 @@ class DeepStatsEngine:
         base_home_ontarget = round(base_home_shots * 0.38, 1)
         base_away_ontarget = round(base_away_shots * 0.35, 1)
 
+        away_keeper = get_team_goalkeeper(away_name)
+
         if is_wet_fast:
             shot_mod = 1.14
             ontarget_mod = 1.18
@@ -110,7 +112,7 @@ class DeepStatsEngine:
             keeper_saves_odds = 1.82
             keeper_saves_prob = 81
             keeper_rationale = (
-                f"Superficie rápida y balones húmedos fuerzan al portero de {away_name} a desviar a córner o dar rebotes "
+                f"Superficie rápida y balones húmedos fuerzan a {away_keeper} ({away_name}) a desviar a córner o dar rebotes "
                 f"en vez de embolsar, disparando el conteo de atajadas oficiales."
             )
         elif is_slow_windy:
@@ -124,7 +126,7 @@ class DeepStatsEngine:
             keeper_saves_line = 2.5
             keeper_saves_odds = 1.70
             keeper_saves_prob = 74
-            keeper_rationale = f"Menor frecuencia de remates entre los tres palos; defensas interceptan antes del arco."
+            keeper_rationale = f"{away_keeper} exigido con menor frecuencia de remates directos; defensas interceptan antes del arco."
         else:
             shot_mod = 1.0
             ontarget_mod = 1.0
@@ -136,7 +138,7 @@ class DeepStatsEngine:
             keeper_saves_line = 3.5
             keeper_saves_odds = 1.95
             keeper_saves_prob = 68
-            keeper_rationale = f"Portero exigido ante ataques posicionales y llegadas de segunda línea."
+            keeper_rationale = f"{away_keeper} exigido ante ataques posicionales y llegadas de segunda línea de {home_name}."
 
         final_home_shots = round(base_home_shots * shot_mod, 1)
         final_away_shots = round(base_away_shots * shot_mod, 1)
@@ -209,8 +211,8 @@ class DeepStatsEngine:
                 "longDistanceFactor": long_factor,
                 "tacticalRationale": weather_rationale,
                 "goalkeeperSaves": {
-                    "goalkeeper": f"Portero Titular ({away_name})",
-                    "market": f"Más de {keeper_saves_line} Atajadas en el Partido",
+                    "goalkeeper": f"{away_keeper} ({away_name})",
+                    "market": f"{away_keeper} ({away_name}): Más de {keeper_saves_line} Atajadas en el Partido",
                     "odds": keeper_saves_odds,
                     "prob": keeper_saves_prob,
                     "rationale": keeper_rationale
@@ -495,7 +497,7 @@ class DeepStatsEngine:
         comb2_pick3 = {
             "id": f"{fixture_id}_bb_kp1",
             "category": "🧤 ATAJADAS DE PORTERO",
-            "market": f"Portero ({away_name}): Más de {keeper_saves_line} Atajadas",
+            "market": f"{away_keeper} ({away_name}): Más de {keeper_saves_line} Atajadas",
             "odds": keeper_saves_odds,
             "prob": keeper_saves_prob,
             "reason": keeper_rationale
@@ -510,7 +512,7 @@ class DeepStatsEngine:
             "certainty": 85,
             "combinedOdds": comb2_odds,
             "rationale": (
-                f"Aprovecha el clima y césped: el bote rápido induce disparos lejanos con atajadas del arquero, "
+                f"Aprovecha el clima y césped: el bote rápido induce disparos lejanos con atajadas de {away_keeper}, "
                 f"elevando el conteo de córners y la probabilidad de superar la línea segura de 1.5 goles."
             ),
             "picks": [comb2_pick1, comb2_pick2, comb2_pick3]
