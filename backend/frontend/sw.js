@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sportagent-pwa-v20261018_audit';
+const CACHE_NAME = 'sport-agent-v-restore-1';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=20261018_audit',
+  '/app.js?v=restore1',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'
