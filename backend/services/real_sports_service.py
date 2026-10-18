@@ -109,14 +109,15 @@ def get_santiago_now() -> datetime.datetime:
 
 def get_current_jornada_range(now_santiago: datetime.datetime) -> tuple[datetime.date, datetime.date, List[str]]:
     """
-    Calcula el rango estricto de fechas para la semana / jornada en curso en America/Santiago.
-    El ciclo futbolístico semanal (jornada) abarca 7 días consecutivos desde el viernes
-    de la fecha activa hasta el jueves subsiguiente.
-    Cualquier partido fuera de este rango es automáticamente descartado.
+    Calcula el rango estricto de fechas para la semana calendario cerrada en America/Santiago (Lunes a Domingo).
+    Inicio: Lunes a las 00:00:00 (weekday() == 0).
+    Fin: Domingo a las 23:59:59 (weekday() == 6).
+    A partir del lunes siguiente a las 00:00, avanza automáticamente a la nueva semana de Lunes a Domingo.
+    Cualquier partido anterior al lunes 00:00 o posterior al domingo 23:59 es automáticamente descartado.
     """
     today = now_santiago.date()
-    days_since_friday = (today.weekday() - 4) % 7
-    start_date = today - datetime.timedelta(days=days_since_friday)
+    days_since_monday = today.weekday()  # Lunes = 0, ..., Domingo = 6
+    start_date = today - datetime.timedelta(days=days_since_monday)
     end_date = start_date + datetime.timedelta(days=6)
     days_str_list = [(start_date + datetime.timedelta(days=i)).strftime("%Y%m%d") for i in range(7)]
     return start_date, end_date, days_str_list
@@ -215,7 +216,7 @@ class RealSportsService:
             if (now_santiago - cls._last_fetch).total_seconds() < 240:
                 return cls._cached_matches
 
-        # Obtener rango estricto de la semana/jornada en curso en America/Santiago (Viernes a Jueves)
+        # Obtener rango estricto de la semana calendario cerrada en America/Santiago (Lunes a Domingo)
         week_start_date, week_end_date, days_to_check = get_current_jornada_range(now_santiago)
 
         tasks = []
@@ -367,6 +368,7 @@ class RealSportsService:
                 "matchDate": match_date_str,
                 "weekStartDate": week_start_date.strftime("%Y-%m-%d"),
                 "weekEndDate": week_end_date.strftime("%Y-%m-%d"),
+                "weekRangeLabel": f"Semana activa: Lun {week_start_date.day} {SPANISH_MONTHS[week_start_date.month]} - Dom {week_end_date.day} {SPANISH_MONTHS[week_end_date.month]}",
                 "isCurrentWeek": True,
                 "dataPhase": phase,
                 "leagueId": l_key,
