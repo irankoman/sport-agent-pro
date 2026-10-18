@@ -473,7 +473,12 @@ class RealSportsService:
         """
         now_santiago = get_santiago_now()
         if not force_refresh and cls._cached_matches and cls._last_fetch:
-            if (now_santiago - cls._last_fetch).total_seconds() < 240:
+            has_live_or_today = any(
+                m.get("isLive") or (m.get("dataPhase") == "🔴 EN VIVO") or (m.get("matchDate") == now_santiago.strftime("%Y-%m-%d"))
+                for m in cls._cached_matches
+            )
+            cache_limit = 20 if has_live_or_today else 240
+            if (now_santiago - cls._last_fetch).total_seconds() < cache_limit:
                 return cls._cached_matches
 
         # Obtener rango estricto de la semana calendario cerrada en America/Santiago (Lunes a Domingo)
@@ -618,12 +623,13 @@ class RealSportsService:
             med_odds = round(odds_data["home_win_odds"] * 1.35, 2)
             high_odds = round(odds_data["home_win_odds"] * odds_data["card_odds"] * 1.70, 2)
 
-            home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, ev_id, league_code=espn_league_code, team_id=home_team_id)
-            home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, ev_id, league_code=espn_league_code, team_id=home_team_id)
-            away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, ev_id, league_code=espn_league_code, team_id=away_team_id)
-            away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, ev_id, league_code=espn_league_code, team_id=away_team_id)
-            home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, ev_id, league_code=espn_league_code, team_id=home_team_id)
-            away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, ev_id, league_code=espn_league_code, team_id=away_team_id)
+            lookup_event_id = espn_event_id or ev_id
+            home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, lookup_event_id, league_code=espn_league_code, team_id=home_team_id)
+            home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, lookup_event_id, league_code=espn_league_code, team_id=home_team_id)
+            away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, lookup_event_id, league_code=espn_league_code, team_id=away_team_id)
+            away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, lookup_event_id, league_code=espn_league_code, team_id=away_team_id)
+            home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, lookup_event_id, league_code=espn_league_code, team_id=home_team_id)
+            away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, lookup_event_id, league_code=espn_league_code, team_id=away_team_id)
 
             h_sc = home_avail_scorers[0]
             h_card = home_avail_cards[0]
@@ -632,6 +638,10 @@ class RealSportsService:
 
             match_data = {
                 "id": ev_id,
+                "espnEventId": espn_event_id,
+                "espnLeagueCode": espn_league_code,
+                "homeTeamId": home_team_id,
+                "awayTeamId": away_team_id,
                 "dayId": day_id,
                 "dayLabel": date_label,
                 "fullDay": full_day,
@@ -736,7 +746,7 @@ class RealSportsService:
             # Analítica individual avanzada (Anotadores con Herencia + Tarjetas con Cruce Directo)
             is_official = bool(is_live or is_finished)
             player_analytics = PlayerPropsEngine.build_player_analytics(
-                fixture_id=ev_id,
+                fixture_id=lookup_event_id,
                 home_name=home_name,
                 away_name=away_name,
                 referee_name=ref_stats.name,
@@ -750,7 +760,7 @@ class RealSportsService:
 
             # Analítica estadística y táctica profunda (Tiros al arco, clima, matriz córners/xG, H2H, psicología, Bet Builder)
             deep_analytics = DeepStatsEngine.build_deep_analytics(
-                fixture_id=ev_id,
+                fixture_id=lookup_event_id,
                 home_name=home_name,
                 away_name=away_name,
                 league_id=l_key,

@@ -133,8 +133,8 @@ class MultiSourceRosterEngine:
         # El cache_key debe incluir event_id si está presente para no mezclar alineaciones de partidos distintos
         cache_key = (l_code, t_id, str(event_id or ""))
 
-        # TTL de 120s si hay partido en curso con event_id, o TTL general si es plantilla base
-        ttl = 120 if event_id else cls.CACHE_TTL_SECONDS
+        # TTL de 15s si hay event_id (partido en curso o próximo), o TTL general si es plantilla base
+        ttl = 15 if event_id else cls.CACHE_TTL_SECONDS
         if cache_key in cls._LIVE_ROSTERS_CACHE:
             ts, cached_roster = cls._LIVE_ROSTERS_CACHE[cache_key]
             if (time.time() - ts) < ttl:
@@ -145,9 +145,26 @@ class MultiSourceRosterEngine:
         official_starters = []
         official_bench = []
 
-        if event_id:
+        real_event_id = str(event_id or "").strip()
+        # Si event_id no es numérico (por ejemplo un slug interno), resolver el event_id numérico de ESPN
+        if real_event_id and not real_event_id.isdigit():
             try:
-                sum_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={event_id}"
+                sc_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/scoreboard"
+                sc_res = requests.get(sc_url, timeout=3.5)
+                if sc_res.status_code == 200:
+                    for ev_item in sc_res.json().get("events", []):
+                        ev_num_id = str(ev_item.get("id", ""))
+                        ev_comps = ev_item.get("competitions", [{}])[0].get("competitors", [])
+                        t_names = [c.get("team", {}).get("displayName", "") for c in ev_comps]
+                        if any(norm_str(d_name) in norm_str(tn) or norm_str(tn) in norm_str(d_name) for tn in t_names):
+                            real_event_id = ev_num_id
+                            break
+            except Exception:
+                pass
+
+        if real_event_id and real_event_id.isdigit():
+            try:
+                sum_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={real_event_id}"
                 res_sum = requests.get(sum_url, timeout=4.5)
                 if res_sum.status_code == 200:
                     sum_data = res_sum.json()
@@ -185,7 +202,7 @@ class MultiSourceRosterEngine:
                     if len(official_starters) >= 8:
                         has_official_lineup = True
             except Exception as e:
-                logger.debug(f"Error fetching summary for event {event_id}: {e}")
+                logger.debug(f"Error fetching summary for event {real_event_id}: {e}")
 
         # 2. Si no hay alineación oficial publicada aún, consultar /teams/{id}/roster de ESPN
         raw_athletes = []
@@ -205,9 +222,10 @@ class MultiSourceRosterEngine:
         fws = []
         bajas = []
         benched_star = None
+        benched_notice = None
 
         if has_official_lineup:
-            # Extraer jugadores titulares confirmados en cancha
+            # 1. Extraer jugadores titulares confirmados en cancha (SOLO starter: true)
             for st in official_starters:
                 name = st["name"]
                 pos = st["pos_code"]
@@ -221,23 +239,39 @@ class MultiSourceRosterEngine:
                 else:
                     mfs.append(name)
 
-            # Si hay pocos delanteros centro puros, promover volantes ofensivos y extremos titulares al ataque
-            if len(fws) < 2:
-                for st in official_starters:
-                    name = st["name"]
-                    pos = st["pos_code"]
-                    if any(c in pos for c in ["AM", "W", "LM", "RM"]) and name not in fws and name not in gks and name not in dfs:
-                        fws.append(name)
+            # 2. Promover volantes ofensivos y extremos titulares al ataque si faltan delanteros centro
+            for st in official_starters:
+                name = st["name"]
+                pos = st["pos_code"]
+                if any(c in pos for c in ["AM", "W", "LM", "RM"]) and name not in fws and name not in gks and name not in dfs:
+                    fws.append(name)
 
-            # Detectar si alguna estrella o delantero conocido arrancó en la banca (ej: Jota en Celtic)
+            # 3. Si aún faltan delanteros, agregar los restantes volantes titulares
+            for st in official_starters:
+                name = st["name"]
+                if name not in fws and name not in gks and name not in dfs:
+                    fws.append(name)
+
+            # 4. Detectar figuras y atacantes que están en la banca (starter: false)
+            benched_star_names = []
+            priority_stars = ["jota", "høgh", "hogh", "forrest", "mheuka", "oxlade", "emenalo"]
+            for target in priority_stars:
+                for b in official_bench:
+                    b_name = b["name"]
+                    if target in b_name.lower() and b_name not in benched_star_names:
+                        benched_star_names.append(b_name)
             for b in official_bench:
                 b_name = b["name"]
-                b_pos = b["pos_code"]
-                if "jota" in b_name.lower():
-                    benched_star = b_name
-                    break
-                elif not benched_star and any(c in b_pos for c in ["F", "ST", "CF", "W", "SUB"]):
-                    benched_star = b_name
+                b_pos = b.get("pos_code", "")
+                if any(c in b_pos for c in ["F", "ST", "CF", "W", "SUB"]) and b_name not in benched_star_names:
+                    benched_star_names.append(b_name)
+
+            benched_star = ", ".join(benched_star_names[:2]) if benched_star_names else None
+            benched_notice = (
+                f"🪑 EN BANCA HOY: {', '.join(benched_star_names[:2])} (Suplentes - Herencia de penales activada en titulares)"
+                if benched_star_names
+                else None
+            )
 
         else:
             # Modo Previa: Clasificar atletas de la plantilla general de ESPN
@@ -396,6 +430,7 @@ class MultiSourceRosterEngine:
             "officialStarters": [s["name"] for s in official_starters],
             "officialBench": [b["name"] for b in official_bench],
             "benchedStar": benched_star,
+            "benchedStarNotice": benched_notice,
             "scorers": scorers,
             "cards": cards,
             "bajas": bajas

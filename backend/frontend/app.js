@@ -2322,7 +2322,7 @@
                                               <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-mono">
                                                 🔥 HEREDA PENALES (+EV)
                                               </span>
-                                            ) : sc.isOfficialStarter || (sc.isStarter && (lineupMode === 'CONFIRMADO' || sc.starterStatus === 'TITULAR')) ? (
+                                            ) : (sc.isOfficialStarter && !sc.isBlocked) ? (
                                               <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
                                                 ✓ TITULAR
                                               </span>
@@ -2459,8 +2459,8 @@
                                       <span className="text-xl">🔄</span>
                                       <div>
                                         <div className="font-black text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
-                                          <span>REEMPLAZO TÁCTICO RECOMENDADO (PLAN B)</span>
-                                          <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-bold font-mono">Activo</span>
+                                          <span>{tacticalPlanB.bannerNotice || `🪑 EN BANCA HOY: ${tacticalPlanB.benchedPlayer} (Suplente - Herencia Activa)`}</span>
+                                          <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-bold font-mono">Plan B</span>
                                         </div>
                                         <p className="text-slate-300 mt-0.5">{tacticalPlanB.tacticalRationale}</p>
                                       </div>
@@ -2537,7 +2537,7 @@
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
                                                   🪑 BANCA
                                                 </span>
-                                              ) : sn.isOfficialStarter || (sn.isStarter && (lineupMode === 'CONFIRMADO' || sn.starterStatus === 'TITULAR')) ? (
+                                              ) : (sn.isOfficialStarter && !sn.isBlocked) ? (
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
                                                   ✓ TITULAR
                                                 </span>
@@ -2717,7 +2717,7 @@
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
                                                   🪑 BANCA
                                                 </span>
-                                              ) : cd.isOfficialStarter || (cd.isStarter && (lineupMode === 'CONFIRMADO' || cd.starterStatus === 'TITULAR')) ? (
+                                              ) : (cd.isOfficialStarter && !cd.isBlocked) ? (
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
                                                   ✓ TITULAR
                                                 </span>

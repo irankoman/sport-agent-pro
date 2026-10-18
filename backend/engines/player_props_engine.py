@@ -51,6 +51,7 @@ class PlayerPropsEngine:
         away_avail_cards = away_roster.get("cards", [])
         home_avail_dfs = home_roster.get("defenders", [])
         home_benched_star = home_roster.get("benchedStar")
+        home_benched_notice = home_roster.get("benchedStarNotice")
 
         # ---------------------------------------------------------------------
         # 1. ANOTADORES CALIBRADOS MATEMÁTICAMENTE (Poisson + Margen Betano 7.5%)
@@ -224,11 +225,12 @@ class PlayerPropsEngine:
 
         scorers_pool = [sc1, sc2, sc3]
 
-        # Plan B táctico activado si una figura arrancó en la banca (ej: Jota)
+        # Plan B táctico activado si una figura arrancó en la banca (ej: Jota, Kasper Høgh)
         tactical_plan_b = None
         if lineup_confirmed and home_benched_star:
             tactical_plan_b = {
                 "benchedPlayer": home_benched_star,
+                "bannerNotice": home_benched_notice or f"🪑 EN BANCA HOY: {home_benched_star} (Suplentes - Herencia de penales activada en titulares)",
                 "replacementStarter": sc1["name"],
                 "newOdds": sc1["odds"],
                 "projectedMinutes": "Suplente (En la Banca)",
@@ -460,7 +462,8 @@ class PlayerPropsEngine:
             "topScorers": scorers_pool,
             "snipers": snipers_pool,
             "topCards": cards_pool,
-            "tacticalPlanB": tactical_plan_b
+            "tacticalPlanB": tactical_plan_b,
+            "benchedStarNotice": home_benched_notice
         }
 
     @classmethod
