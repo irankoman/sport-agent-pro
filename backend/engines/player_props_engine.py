@@ -7,6 +7,7 @@ Motor Analítico Avanzado de Pronósticos Individuales para Betano
 from typing import Dict, Any, List
 import hashlib
 from backend.data.team_rosters import get_team_roster
+from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
 
 
 class PlayerPropsEngine:
@@ -26,14 +27,17 @@ class PlayerPropsEngine:
         is_official: bool,
         benched_p1: bool = False
     ) -> Dict[str, Any]:
-        home_prof = cls.get_club_profile(home_name)
-        away_prof = cls.get_club_profile(away_name)
+        # Filtrado multi-fuente en tiempo real: Cero porteros en ataque y exclusión de bajas por lesión/suspensión
+        home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, fixture_id)
+        away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, fixture_id)
+        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id)
+        away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, fixture_id)
 
-        # Goleadores Reales
+        # Goleadores Reales Disponibles (100% jugadores de campo activos)
         scorers_pool = []
-        sc1_raw = home_prof["scorers"][0]
-        sc2_raw = home_prof["scorers"][1] if len(home_prof["scorers"]) > 1 else home_prof["scorers"][0]
-        sc3_raw = away_prof["scorers"][0]
+        sc1_raw = home_avail_scorers[0]
+        sc2_raw = home_avail_scorers[1] if len(home_avail_scorers) > 1 else home_avail_scorers[0]
+        sc3_raw = away_avail_scorers[0]
 
         if is_official and benched_p1:
             sc1 = {
@@ -124,11 +128,11 @@ class PlayerPropsEngine:
                 "tacticalRationale": f"{sc2['name']} asume la referencia ofensiva titular y la ejecución del penal ante la suplencia táctica de {sc1['name']}."
             }
 
-        # Tarjetas Amarillas con Cruce Directo entre Futbolistas Reales
-        card1_raw = home_prof["cards"][0]
-        card2_raw = away_prof["cards"][0]
-        card3_raw = home_prof["cards"][1] if len(home_prof["cards"]) > 1 else home_prof["cards"][0]
-        away_playmaker = away_prof["scorers"][1]["name"] if len(away_prof["scorers"]) > 1 else away_prof["scorers"][0]["name"]
+        # Tarjetas Amarillas con Cruce Directo entre Futbolistas Reales Disponibles (100% Defensas/Contenciones)
+        card1_raw = home_avail_cards[0]
+        card2_raw = away_avail_cards[0]
+        card3_raw = home_avail_cards[1] if len(home_avail_cards) > 1 else home_avail_cards[0]
+        away_playmaker = away_avail_scorers[1]["name"] if len(away_avail_scorers) > 1 else away_avail_scorers[0]["name"]
 
         ref_adj = 1.12 if referee_yellows >= 4.5 else (0.92 if referee_yellows <= 3.8 else 1.0)
 

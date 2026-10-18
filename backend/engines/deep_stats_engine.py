@@ -11,6 +11,7 @@ Integra 6 módulos avanzados para la Sub-Ventana de Detalle:
 import hashlib
 from typing import Dict, Any, List
 from backend.data.team_rosters import get_team_roster, get_team_goalkeeper
+from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
 
 class DeepStatsEngine:
     @classmethod
@@ -331,7 +332,8 @@ class DeepStatsEngine:
         # =========================================================================
         # 4. RADIOGRAFÍA FÍSICA Y MENTAL / PSICOLÓGICA DE JUGADORES (FUTBOLISTAS REALES)
         # =========================================================================
-        home_card_p1 = home_prof["cards"][0]
+        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id)
+        home_card_p1 = home_avail_cards[0] if home_avail_cards else home_prof["cards"][0]
         home_players = [
             {
                 "name": sc1["name"],
@@ -428,9 +430,14 @@ class DeepStatsEngine:
             }
         ]
 
+        home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, fixture_id)
+        away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, fixture_id)
+
         squad_radiography = {
             "home": home_players,
-            "away": away_players
+            "away": away_players,
+            "homeBajas": home_bajas,
+            "awayBajas": away_bajas
         }
 
         # =========================================================================

@@ -16,6 +16,7 @@ from backend.services.odds_service import BetanoOddsService
 from backend.engines.player_props_engine import PlayerPropsEngine
 from backend.engines.deep_stats_engine import DeepStatsEngine
 from backend.data.team_rosters import get_team_roster
+from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
 
 LEAGUE_CONFIG = {
     "chi": {
@@ -345,12 +346,17 @@ class RealSportsService:
             med_odds = round(odds_data["home_win_odds"] * 1.35, 2)
             high_odds = round(odds_data["home_win_odds"] * odds_data["card_odds"] * 1.70, 2)
 
-            home_roster = get_team_roster(home_name)
-            away_roster = get_team_roster(away_name)
-            h_sc = home_roster["scorers"][0]
-            h_card = home_roster["cards"][0]
-            a_sc = away_roster["scorers"][0]
-            a_card = away_roster["cards"][0]
+            home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, ev_id)
+            home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, ev_id)
+            away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, ev_id)
+            away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, ev_id)
+            home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, ev_id)
+            away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, ev_id)
+
+            h_sc = home_avail_scorers[0]
+            h_card = home_avail_cards[0]
+            a_sc = away_avail_scorers[0]
+            a_card = away_avail_cards[0]
 
             match_data = {
                 "id": ev_id,
@@ -374,10 +380,10 @@ class RealSportsService:
                 "city": city,
                 "starred": False,
                 "lineupSummary": {
-                  "homeType": "XI 100% TITULAR",
-                  "homeBadge": "green",
-                  "awayType": "TITULARES HABITUALES",
-                  "awayBadge": "green"
+                  "homeType": "XI 100% TITULAR" if not home_bajas else f"XI CON {len(home_bajas)} BAJA(S)",
+                  "homeBadge": "green" if not home_bajas else "amber",
+                  "awayType": "TITULARES HABITUALES" if not away_bajas else f"XI CON {len(away_bajas)} BAJA(S)",
+                  "awayBadge": "green" if not away_bajas else "amber"
                 },
                 "weatherPitch": {
                   "condition": cfg["default_weather"],
@@ -393,21 +399,27 @@ class RealSportsService:
                 },
                 "teamStatus": {
                   "home": {
-                    "lineupStatus": "ONCE TITULAR CONFIRMADO",
-                    "rotationReason": f"Plantilla de {home_name} disponible al 100%.",
+                    "lineupStatus": "ONCE TITULAR CONFIRMADO" if (is_live or is_finished) else "XI PROBABLE EN ANÁLISIS",
+                    "rotationReason": f"Plantilla de {home_name}: {len(home_bajas)} baja(s) reportadas en vivo." if home_bajas else f"Plantilla de {home_name} disponible al 100%.",
                     "players": [
-                        { "name": h_sc["name"], "role": "Titular (90m)", "fit": h_sc.get("fit", 97), "note": f"Pateador de penales de {home_name} en Betano" },
+                        { "name": h_sc["name"], "role": "Titular (90m)", "fit": h_sc.get("fit", 97), "note": f"Pateador ofensivo de {home_name} en Betano" },
                         { "name": h_card["name"], "role": "Titular (90m)", "fit": h_card.get("fit", 94), "note": f"Zaguero titular; riesgo de amonestación táctica" }
-                    ]
+                    ],
+                    "bajas": home_bajas
                   },
                   "away": {
                     "lineupStatus": "PLANTILLA TITULAR",
-                    "rotationReason": f"Alineación base de {away_name} confirmada.",
+                    "rotationReason": f"Plantilla de {away_name}: {len(away_bajas)} baja(s) reportadas en vivo." if away_bajas else f"Alineación base de {away_name} confirmada.",
                     "players": [
                         { "name": a_sc["name"], "role": "Titular (90m)", "fit": a_sc.get("fit", 95), "note": f"Referente ofensivo de {away_name} en Betano" },
                         { "name": a_card["name"], "role": "Titular (90m)", "fit": a_card.get("fit", 91), "note": f"Marcador de choque; propenso a amonestación" }
-                    ]
+                    ],
+                    "bajas": away_bajas
                   }
+                },
+                "bajas": {
+                  "home": home_bajas,
+                  "away": away_bajas
                 },
                 "suggestedProfiles": {
                   "conservador": {

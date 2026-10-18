@@ -1120,7 +1120,7 @@ REAL_GOALKEEPERS: Dict[str, str] = {
     'unionlacalera': 'Matías Ibáñez',
     # España
     'realmadrid': 'Thibaut Courtois',
-    'barcelona': 'Marc-André ter Stegen',
+    'barcelona': 'Iñaki Peña',
     'atleticomadrid': 'Jan Oblak',
     'sevilla': 'Ørjan Nyland',
     'realbetis': 'Rui Silva',
@@ -1142,7 +1142,7 @@ REAL_GOALKEEPERS: Dict[str, str] = {
     # Inglaterra
     'arsenal': 'David Raya',
     'manchestercity': 'Ederson',
-    'liverpool': 'Alisson Becker',
+    'liverpool': 'Caoimhín Kelleher',
     'chelsea': 'Robert Sánchez',
     'manchesterunited': 'André Onana',
     'tottenham': 'Guglielmo Vicario',
@@ -1248,9 +1248,18 @@ FALLBACK_GOALKEEPERS: List[str] = [
 
 def get_team_goalkeeper(team_name: str) -> str:
     """
-    Retorna el nombre y apellido del portero titular real del club.
-    Garantiza 100% nombre y apellido de futbolista real, nunca etiquetas genéricas.
+    Retorna el nombre y apellido del portero titular real del club cruzado por el motor multi-fuente.
+    Garantiza 100% nombre y apellido de futbolista real, nunca etiquetas genéricas ni jugadores de campo.
+    Si el titular está de baja por lesión/suspensión, promueve automáticamente al suplente activo.
     """
+    try:
+        from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
+        gk_data = MultiSourceRosterEngine.get_active_goalkeeper(team_name)
+        if gk_data and gk_data.get('name'):
+            return gk_data['name']
+    except Exception:
+        pass
+
     key = norm_team_key(team_name)
     if key in REAL_GOALKEEPERS:
         return REAL_GOALKEEPERS[key]
