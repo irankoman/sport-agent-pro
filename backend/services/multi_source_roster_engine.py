@@ -130,33 +130,66 @@ class MultiSourceRosterEngine:
         Cero diccionarios estáticos, cero jugadores inventados.
         """
         l_code, t_id, d_name = cls.resolve_team(team_name, league_code, team_id)
-        cache_key = (l_code, t_id)
+        # El cache_key debe incluir event_id si está presente para no mezclar alineaciones de partidos distintos
+        cache_key = (l_code, t_id, str(event_id or ""))
 
-        # Verificar caché en RAM reciente
+        # TTL de 120s si hay partido en curso con event_id, o TTL general si es plantilla base
+        ttl = 120 if event_id else cls.CACHE_TTL_SECONDS
         if cache_key in cls._LIVE_ROSTERS_CACHE:
             ts, cached_roster = cls._LIVE_ROSTERS_CACHE[cache_key]
-            if (time.time() - ts) < cls.CACHE_TTL_SECONDS:
+            if (time.time() - ts) < ttl:
                 return cached_roster
 
-        # 1. Si hay event_id, verificar primero si summary tiene alineaciones confirmadas
-        confirmed_lineup_athletes = []
+        # 1. Si hay event_id, consultar summary oficial de ESPN para verificar alineaciones en vivo
+        has_official_lineup = False
+        official_starters = []
+        official_bench = []
+
         if event_id:
             try:
                 sum_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={event_id}"
-                res_sum = requests.get(sum_url, timeout=4)
+                res_sum = requests.get(sum_url, timeout=4.5)
                 if res_sum.status_code == 200:
                     sum_data = res_sum.json()
                     for r_entry in sum_data.get("rosters", []):
-                        r_team_id = str(r_entry.get("team", {}).get("id", ""))
-                        if r_team_id == t_id or norm_str(r_entry.get("team", {}).get("displayName", "")) == norm_str(team_name):
-                            confirmed_lineup_athletes = r_entry.get("roster", [])
+                        r_team = r_entry.get("team", {})
+                        r_team_id = str(r_team.get("id", ""))
+                        r_team_name = r_team.get("displayName", "") or r_team.get("name", "")
+                        
+                        match_team = False
+                        if t_id and r_team_id == str(t_id):
+                            match_team = True
+                        elif norm_str(r_team_name) == norm_str(team_name) or norm_str(team_name) in norm_str(r_team_name) or norm_str(r_team_name) in norm_str(team_name):
+                            match_team = True
+                            
+                        if match_team:
+                            for item in r_entry.get("roster", []):
+                                ath = item.get("athlete", {})
+                                name = ath.get("displayName") or ath.get("name")
+                                if not name:
+                                    continue
+                                pos_obj = item.get("position", {})
+                                pos_code = (pos_obj.get("abbreviation") or ath.get("position", {}).get("abbreviation", "M")).upper()
+                                is_st = (item.get("starter") is True)
+                                p_dict = {
+                                    "name": name,
+                                    "pos_code": pos_code,
+                                    "is_starter": is_st,
+                                    "jersey": item.get("jersey", "")
+                                }
+                                if is_st:
+                                    official_starters.append(p_dict)
+                                else:
+                                    official_bench.append(p_dict)
                             break
+                    if len(official_starters) >= 8:
+                        has_official_lineup = True
             except Exception as e:
                 logger.debug(f"Error fetching summary for event {event_id}: {e}")
 
-        # 2. Consultar plantilla oficial activa en vivo desde ESPN /teams/{id}/roster
+        # 2. Si no hay alineación oficial publicada aún, consultar /teams/{id}/roster de ESPN
         raw_athletes = []
-        if t_id:
+        if not has_official_lineup and t_id:
             roster_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/teams/{t_id}/roster"
             try:
                 res_rost = requests.get(roster_url, timeout=5)
@@ -165,120 +198,143 @@ class MultiSourceRosterEngine:
             except Exception as e:
                 logger.warning(f"Error fetching ESPN live roster for {team_name} (ID {t_id}): {e}")
 
-        # Clasificación estricta de atletas por 'position.abbreviation'
+        # Clasificación estricta de atletas (CERO PORTEROS en ataque, y separación Titulares vs Banca)
         gks = []
         dfs = []
         mfs = []
         fws = []
         bajas = []
+        benched_star = None
 
-        # Si tenemos alineación confirmada en summary con atletas reales, usarlos con prioridad
-        if confirmed_lineup_athletes:
-            for item in confirmed_lineup_athletes:
-                ath = item.get("athlete", {})
-                name = ath.get("displayName") or ath.get("name")
-                if not name:
-                    continue
-                pos_code = item.get("position", {}).get("abbreviation") or ath.get("position", {}).get("abbreviation", "M")
-                if pos_code == "G":
+        if has_official_lineup:
+            # Extraer jugadores titulares confirmados en cancha
+            for st in official_starters:
+                name = st["name"]
+                pos = st["pos_code"]
+                if pos == "G" or "GK" in pos:
                     gks.append(name)
                     cls._LIVE_GOALKEEPERS_SET.add(norm_player_name(name))
-                elif pos_code == "D":
+                elif any(c in pos for c in ["D", "CB", "LB", "RB", "WB"]):
                     dfs.append(name)
-                elif pos_code == "F":
+                elif any(c in pos for c in ["F", "ST", "CF", "RCF", "LCF", "RW", "LW"]):
                     fws.append(name)
                 else:
                     mfs.append(name)
 
-        # Analizar todos los atletas de la plantilla activa
-        for a in raw_athletes:
-            name = a.get("displayName") or a.get("name")
-            if not name:
-                continue
-            pos_code = a.get("position", {}).get("abbreviation", "M")
-            injuries = a.get("injuries", [])
+            # Si hay pocos delanteros centro puros, promover volantes ofensivos y extremos titulares al ataque
+            if len(fws) < 2:
+                for st in official_starters:
+                    name = st["name"]
+                    pos = st["pos_code"]
+                    if any(c in pos for c in ["AM", "W", "LM", "RM"]) and name not in fws and name not in gks and name not in dfs:
+                        fws.append(name)
 
-            # Detectar ausencias médicas o disciplinarias
-            if injuries:
-                inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
-                detail = inj.get("details", {}).get("type") if isinstance(inj, dict) else "Baja médica reportada"
-                bajas.append({
-                    "name": name,
-                    "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
-                    "type": "LESIÓN",
-                    "badge": "❌ Baja por Lesión",
-                    "reason": detail or "Lesión en evaluación médica oficial",
-                    "expectedReturn": "En recuperación"
-                })
-                continue
+            # Detectar si alguna estrella o delantero conocido arrancó en la banca (ej: Jota en Celtic)
+            for b in official_bench:
+                b_name = b["name"]
+                b_pos = b["pos_code"]
+                if "jota" in b_name.lower():
+                    benched_star = b_name
+                    break
+                elif not benched_star and any(c in b_pos for c in ["F", "ST", "CF", "W", "SUB"]):
+                    benched_star = b_name
 
-            if pos_code == "G":
-                if name not in gks:
-                    gks.append(name)
-                cls._LIVE_GOALKEEPERS_SET.add(norm_player_name(name))
-            elif pos_code == "D":
-                if name not in dfs:
-                    dfs.append(name)
-            elif pos_code == "F":
-                if name not in fws:
-                    fws.append(name)
-            else:
-                if name not in mfs:
-                    mfs.append(name)
+        else:
+            # Modo Previa: Clasificar atletas de la plantilla general de ESPN
+            for a in raw_athletes:
+                name = a.get("displayName") or a.get("name")
+                if not name:
+                    continue
+                pos_code = a.get("position", {}).get("abbreviation", "M").upper()
+                injuries = a.get("injuries", [])
+
+                if injuries:
+                    inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
+                    detail = inj.get("details", {}).get("type") if isinstance(inj, dict) else "Baja médica reportada"
+                    bajas.append({
+                        "name": name,
+                        "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
+                        "type": "LESIÓN",
+                        "badge": "❌ Baja por Lesión",
+                        "reason": detail or "Lesión en evaluación médica oficial",
+                        "expectedReturn": "En recuperación"
+                    })
+                    continue
+
+                if pos_code == "G" or "GK" in pos_code:
+                    if name not in gks:
+                        gks.append(name)
+                    cls._LIVE_GOALKEEPERS_SET.add(norm_player_name(name))
+                elif any(c in pos_code for c in ["D", "CB", "LB", "RB", "WB"]):
+                    if name not in dfs:
+                        dfs.append(name)
+                elif any(c in pos_code for c in ["F", "ST", "CF", "RCF", "LCF", "RW", "LW"]):
+                    if name not in fws:
+                        fws.append(name)
+                else:
+                    if name not in mfs:
+                        mfs.append(name)
 
         # Portero Titular y Suplente Oficiales
         active_gk = gks[0] if gks else f"Portero Titular de {team_name}"
-        backup_gk = gks[1] if len(gks) > 1 else active_gk
+        backup_gk = official_bench[0]["name"] if (has_official_lineup and official_bench) else (gks[1] if len(gks) > 1 else active_gk)
 
-        # Asignar reemplazos reales a las bajas
-        for b in bajas:
-            b_pos = b.get("pos")
-            if b_pos == "GK":
-                b["replacement"] = f"{backup_gk} (Portero Suplente Promovido)"
-            elif b_pos == "DF":
-                rep = dfs[0] if dfs else "Zaguero Titular"
-                b["replacement"] = f"{rep} (Zaguero Titular Promovido)"
-            elif b_pos == "FW":
-                rep = fws[0] if fws else (mfs[0] if mfs else "Atacante Titular")
-                b["replacement"] = f"{rep} (Delantero Titular Promovido)"
-            else:
-                rep = mfs[0] if mfs else "Mediocampista Titular"
-                b["replacement"] = f"{rep} (Volante Titular Promovido)"
-
-        # Goleadores Reales (100% Forwards y Midfielders atacantes, CERO PORTEROS)
+        # Goleadores Reales (100% Forwards y Midfielders atacantes, CERO PORTEROS, 100% Titulares si hay alineación)
         scorers = []
-        p1 = fws[0] if fws else (mfs[0] if mfs else "Referente Ofensivo")
+        p1 = fws[0] if fws else (mfs[0] if mfs else "Atacante Titular")
+        p2 = fws[1] if len(fws) > 1 else (mfs[0] if (len(fws) <= 1 and mfs and mfs[0] != p1) else (mfs[1] if len(mfs) > 1 else "Segundo Atacante"))
+        p3 = fws[2] if len(fws) > 2 else (mfs[1] if (mfs and mfs[1] not in [p1, p2]) else (mfs[0] if mfs and mfs[0] not in [p1, p2] else "Organizador Ofensivo"))
+
+        p1_inherited = bool(benched_star)
+        p1_role = f"Pateador N°1 Titular de {team_name} (Hereda Penales)" if p1_inherited else f"Pateador N°1 de {team_name} (Penales)"
+        p1_notice = f"🔥 VALOR DETECTADO: {p1} asume la referencia ofensiva ante la suplencia hoy de {benched_star}" if p1_inherited else None
+
         scorers.append({
             "name": p1,
-            "role": f"Pateador N°1 de {team_name} (Penales)",
-            "pos": "Delantero Centro Titular",
+            "role": p1_role,
+            "pos": "Delantero Centro Titular" if has_official_lineup else "Delantero Referente",
             "xG": 0.68,
             "fit": 97,
             "penalties": True,
             "freeKicks": False,
-            "baseOdds": 2.30
+            "baseOdds": 2.30,
+            "inherited": p1_inherited,
+            "inheritanceNotice": p1_notice,
+            "isStarter": True,
+            "isOfficialStarter": has_official_lineup,
+            "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
-        p2 = fws[1] if len(fws) > 1 else (mfs[0] if (len(fws) <= 1 and mfs and mfs[0] != p1) else (mfs[1] if len(mfs) > 1 else "Segundo Atacante"))
+
         scorers.append({
             "name": p2,
-            "role": f"Pateador N°2 de {team_name} (Hereda Penales)",
-            "pos": "Extremo / Atacante Titular",
+            "role": f"Pateador N°2 de {team_name} (Tiros Libres)",
+            "pos": "Extremo / Atacante Titular" if has_official_lineup else "Extremo Ofensivo",
             "xG": 0.52,
             "fit": 95,
             "penalties": False,
             "freeKicks": True,
-            "baseOdds": 2.75
+            "baseOdds": 2.75,
+            "inherited": False,
+            "inheritanceNotice": None,
+            "isStarter": True,
+            "isOfficialStarter": has_official_lineup,
+            "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
-        p3 = mfs[0] if (mfs and mfs[0] not in [p1, p2]) else (mfs[1] if len(mfs) > 1 else (fws[2] if len(fws) > 2 else "Organizador Ofensivo"))
+
         scorers.append({
             "name": p3,
             "role": f"Llegador de segunda línea de {team_name}",
-            "pos": "Mediocampista Ofensivo",
+            "pos": "Mediocampista Ofensivo Titular" if has_official_lineup else "Mediocampista Ofensivo",
             "xG": 0.38,
             "fit": 93,
             "penalties": False,
             "freeKicks": False,
-            "baseOdds": 3.60
+            "baseOdds": 3.60,
+            "inherited": False,
+            "inheritanceNotice": None,
+            "isStarter": True,
+            "isOfficialStarter": has_official_lineup,
+            "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
 
         # Tarjetas / Disciplina Reales (100% Defenders y Midfielders de contención, CERO PORTEROS)
@@ -287,46 +343,59 @@ class MultiSourceRosterEngine:
         cards.append({
             "name": c1,
             "role": f"Zaguero Central de {team_name}",
-            "pos": "Defensa Central",
+            "pos": "Defensa Central Titular" if has_official_lineup else "Defensa Central",
             "fit": 94,
             "dribbled": 2.6,
             "alert": "⚡ Advertencia: Faltas tácticas en corte directo",
             "baseOdds": 2.35,
-            "prob": 70
+            "prob": 70,
+            "isStarter": True,
+            "isOfficialStarter": has_official_lineup,
+            "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
         c2 = dfs[1] if len(dfs) > 1 else (dfs[0] if dfs else "Marcador de Banda")
         cards.append({
             "name": c2,
             "role": f"Marcador de Banda de {team_name}",
-            "pos": "Lateral Defensivo",
+            "pos": "Lateral Defensivo Titular" if has_official_lineup else "Lateral Defensivo",
             "fit": 91,
             "dribbled": 3.1,
             "alert": "⚠️ Duelo por velocidad en repliegue",
             "baseOdds": 2.60,
-            "prob": 64
+            "prob": 64,
+            "isStarter": True,
+            "isOfficialStarter": has_official_lineup,
+            "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
         c3 = mfs[1] if len(mfs) > 1 else (dfs[2] if len(dfs) > 2 else (mfs[0] if mfs else "Volante de Contención"))
         cards.append({
             "name": c3,
             "role": f"Pivote de Recuperación de {team_name}",
-            "pos": "Contención Medular",
+            "pos": "Contención Medular Titular" if has_official_lineup else "Contención Medular",
             "fit": 92,
             "dribbled": 2.2,
             "alert": "⚠️ Fricción en zona de recuperación",
             "baseOdds": 2.75,
-            "prob": 58
+            "prob": 58,
+            "isStarter": True,
+            "isOfficialStarter": has_official_lineup,
+            "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
 
         roster_data = {
             "club": team_name,
             "teamId": t_id,
             "leagueCode": l_code,
+            "hasOfficialLineup": has_official_lineup,
             "activeGoalkeeper": active_gk,
             "backupGoalkeeper": backup_gk,
             "goalkeepers": gks,
             "defenders": dfs,
             "midfielders": mfs,
             "forwards": fws,
+            "officialStarters": [s["name"] for s in official_starters],
+            "officialBench": [b["name"] for b in official_bench],
+            "benchedStar": benched_star,
             "scorers": scorers,
             "cards": cards,
             "bajas": bajas

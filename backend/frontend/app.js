@@ -2276,8 +2276,12 @@
                                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
                                       <span>📊</span> Cuota Mercado (Ref. Betano/Live)
                                     </span>
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
-                                      {lineupMode === 'CONFIRMADO' ? 'Once Validado 60m' : 'Previa Estimada'}
+                                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                                      (activeAnalytics.hasOfficialLineup || (lineupMode === 'CONFIRMADO' && selectedMatch.playerAnalytics?.isOfficialConfirmed))
+                                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                        : 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
+                                    }`}>
+                                      {(activeAnalytics.hasOfficialLineup || (lineupMode === 'CONFIRMADO' && selectedMatch.playerAnalytics?.isOfficialConfirmed)) ? '🟢 Once Validado Oficial' : '🟡 Previa Estimada (XI Probable)'}
                                     </span>
                                   </div>
                                 </div>
@@ -2310,17 +2314,21 @@
                                         <div>
                                           <div className="flex items-center justify-between mb-1.5 gap-1">
                                             <span className="text-[10px] font-black uppercase text-slate-400 font-mono truncate">{sc.team}</span>
-                                            {sc.isBlocked ? (
+                                            {sc.isBlocked || sc.starterStatus === 'SUPLENTE' ? (
                                               <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
-                                                🚫 SUPLENTE (BLOQUEADO)
+                                                🪑 EN LA BANCA (Suplente Hoy - Riesgo Minutos)
                                               </span>
                                             ) : sc.inherited ? (
                                               <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-mono">
                                                 🔥 HEREDA PENALES (+EV)
                                               </span>
-                                            ) : (
+                                            ) : sc.isOfficialStarter || (sc.isStarter && (lineupMode === 'CONFIRMADO' || sc.starterStatus === 'TITULAR')) ? (
                                               <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
                                                 ✓ TITULAR
+                                              </span>
+                                            ) : (
+                                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
+                                                🟡 XI PROBABLE (Por Confirmar)
                                               </span>
                                             )}
                                           </div>
@@ -2524,15 +2532,26 @@
                                         <div>
                                           <div className="flex items-center justify-between mb-1.5 gap-1">
                                             <span className="text-[10px] font-black uppercase text-slate-400 font-mono truncate">{sn.team}</span>
-                                            {isAerial ? (
-                                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-mono">
-                                                ✈️ AÉREO CÓRNER
-                                              </span>
-                                            ) : (
-                                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono">
-                                                🎯 {sn.accuracy || 'Precisión'}
-                                              </span>
-                                            )}
+                                            <div className="flex items-center gap-1">
+                                              {sn.isBlocked || sn.starterStatus === 'SUPLENTE' ? (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
+                                                  🪑 BANCA
+                                                </span>
+                                              ) : sn.isOfficialStarter || (sn.isStarter && (lineupMode === 'CONFIRMADO' || sn.starterStatus === 'TITULAR')) ? (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
+                                                  ✓ TITULAR
+                                                </span>
+                                              ) : (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
+                                                  🟡 PROBABLE
+                                                </span>
+                                              )}
+                                              {isAerial ? (
+                                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-mono">
+                                                  ✈️ CÓRNER
+                                                </span>
+                                              ) : null}
+                                            </div>
                                           </div>
 
                                           <h5 className="text-sm font-black text-white">{sn.name}</h5>
@@ -2693,7 +2712,22 @@
                                         <div>
                                           <div className="flex items-center justify-between mb-1">
                                             <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">{cd.team}</span>
-                                            <span className="text-[10px] font-bold text-rose-400 font-mono">🟨 Alta Frecuencia</span>
+                                            <div className="flex items-center gap-1">
+                                              {cd.isBlocked || cd.starterStatus === 'SUPLENTE' ? (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
+                                                  🪑 BANCA
+                                                </span>
+                                              ) : cd.isOfficialStarter || (cd.isStarter && (lineupMode === 'CONFIRMADO' || cd.starterStatus === 'TITULAR')) ? (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
+                                                  ✓ TITULAR
+                                                </span>
+                                              ) : (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
+                                                  🟡 PROBABLE
+                                                </span>
+                                              )}
+                                              <span className="text-[10px] font-bold text-rose-400 font-mono">🟨 Alta Frecuencia</span>
+                                            </div>
                                           </div>
                                           <h5 className="text-sm font-black text-white">{cd.name}</h5>
                                           <span className="text-[11px] text-rose-300 font-semibold block mt-0.5">{cd.pos}</span>

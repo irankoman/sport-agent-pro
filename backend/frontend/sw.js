@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-props-v2';
+const CACHE_NAME = 'sport-agent-v-live-starters-fix';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=props_v2',
+  '/app.js?v=live_starters_fix',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'

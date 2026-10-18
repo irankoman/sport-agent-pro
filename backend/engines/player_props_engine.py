@@ -37,13 +37,20 @@ class PlayerPropsEngine:
         home_win_odds = odds_data.get("home_win_odds", 1.85)
         away_win_odds = odds_data.get("away_win_odds", 3.80)
 
-        # Extracción 100% en vivo desde ESPN API: cero porteros en ataque y exclusión de bajas
-        # Extracción 100% en vivo desde ESPN API: cero porteros en ataque y exclusión de bajas
-        home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, fixture_id, league_code, home_team_id)
-        away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, fixture_id, league_code, away_team_id)
-        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id, league_code, home_team_id)
-        away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, fixture_id, league_code, away_team_id)
-        home_avail_dfs = MultiSourceRosterEngine.get_available_defenders(home_name, fixture_id, league_code, home_team_id)
+        # Extracción 100% en vivo desde ESPN API: verificación estricta de starter: true en summary
+        home_roster = MultiSourceRosterEngine.get_live_roster(home_name, league_code, home_team_id, event_id=fixture_id)
+        away_roster = MultiSourceRosterEngine.get_live_roster(away_name, league_code, away_team_id, event_id=fixture_id)
+
+        home_has_lineup = home_roster.get("hasOfficialLineup", False)
+        away_has_lineup = away_roster.get("hasOfficialLineup", False)
+        lineup_confirmed = is_official or (home_has_lineup and away_has_lineup)
+
+        home_avail_scorers = home_roster.get("scorers", [])
+        away_avail_scorers = away_roster.get("scorers", [])
+        home_avail_cards = home_roster.get("cards", [])
+        away_avail_cards = away_roster.get("cards", [])
+        home_avail_dfs = home_roster.get("defenders", [])
+        home_benched_star = home_roster.get("benchedStar")
 
         # ---------------------------------------------------------------------
         # 1. ANOTADORES CALIBRADOS MATEMÁTICAMENTE (Poisson + Margen Betano 7.5%)
@@ -134,117 +141,67 @@ class PlayerPropsEngine:
             "reason": f"Eje ofensivo central de {away_name}: finalizador y habilitador en contragolpes."
         }
 
-        scorers_pool = []
-        if is_official and benched_p1:
-            sc1 = {
-                "id": f"{fixture_id}_sc1_bench",
-                "name": sc1_raw["name"],
-                "team": home_name,
-                "pos": sc1_raw["role"],
-                "odds": sc1_odds,
-                "xG90": sc1_xg,
-                "shotsPer90": sc1_shots,
-                "sotPer90": sc1_sot,
-                "avgMinutes": "Banco (Suplente)",
-                "streak": "🔥 3G / 6 SOT en últ. 5 PJ",
-                "rivalDefenseTag": h_matchup_tag,
-                "rivalDefenseDetail": h_matchup_detail,
-                "goalOrAssist": sc1_ga,
-                "fit": 80,
-                "role": sc1_raw["role"],
-                "isStarter": False,
-                "isBlocked": True,
-                "blockReason": f"🚫 BLOQUEO IA: Arranca en el banco de suplentes (Rotación táctica de {home_name})",
-                "inherited": False,
-                "prob": max(15, int(sc1_prob * 0.35)),
-                "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
-            }
-            # Heredero con valor detectado (absorbe penales)
-            boosted_odds = round(max(1.70, sc2_odds - 0.45), 2)
-            boosted_prob = min(75, int(sc2_prob * 1.35))
-            sc2_boosted_ga = {
-                "id": f"{fixture_id}_sc2_boosted_ga",
-                "category": "⚡ GOL O ASISTENCIA",
-                "market": f"{sc2_raw['name']} ({home_name}) - Gol o Asistencia",
-                "odds": round(max(1.38, boosted_odds * 0.62), 2),
-                "prob": min(82, int(boosted_prob * 1.35)),
-                "xg_xa": round(sc2_xg + 0.45, 2),
-                "reason": f"{sc2_raw['name']} asume penales y balón parado con máxima probabilidad de gol/asistencia."
-            }
-            sc2 = {
-                "id": f"{fixture_id}_sc2_boosted",
-                "name": sc2_raw["name"],
-                "team": home_name,
-                "pos": "Pateador N°1 Designado (Hereda Penales)",
-                "odds": boosted_odds,
-                "xG90": round(sc2_xg + 0.30, 2),
-                "shotsPer90": round(sc2_shots + 0.7, 1),
-                "sotPer90": round(sc2_sot + 0.5, 1),
-                "avgMinutes": "88' prom.",
-                "streak": "🔥 2G / 5 SOT en últ. 5 PJ",
-                "rivalDefenseTag": h_matchup_tag,
-                "rivalDefenseDetail": h_matchup_detail,
-                "goalOrAssist": sc2_boosted_ga,
-                "fit": sc2_raw.get("fit", 95),
-                "role": "Pateador N°1 Designado (Hereda Penales y Tiros Libres)",
-                "isStarter": True,
-                "isBlocked": False,
-                "inherited": True,
-                "inheritanceNotice": f"🔥 VALOR DETECTADO: {sc2_raw['name']} hereda penales y balón parado",
-                "prob": boosted_prob,
-                "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
-            }
-        else:
-            sc1 = {
-                "id": f"{fixture_id}_sc1_start",
-                "name": sc1_raw["name"],
-                "team": home_name,
-                "pos": sc1_raw["role"],
-                "odds": sc1_odds,
-                "xG90": sc1_xg,
-                "shotsPer90": sc1_shots,
-                "sotPer90": sc1_sot,
-                "avgMinutes": "86' prom.",
-                "streak": "🔥 3G / 6 SOT en últ. 5 PJ",
-                "rivalDefenseTag": h_matchup_tag,
-                "rivalDefenseDetail": h_matchup_detail,
-                "goalOrAssist": sc1_ga,
-                "fit": sc1_raw.get("fit", 97),
-                "role": sc1_raw["role"],
-                "isStarter": True,
-                "isBlocked": False,
-                "inherited": False,
-                "prob": sc1_prob,
-                "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
-            }
-            sc2 = {
-                "id": f"{fixture_id}_sc2_normal",
-                "name": sc2_raw["name"],
-                "team": home_name,
-                "pos": sc2_raw["role"],
-                "odds": sc2_odds,
-                "xG90": sc2_xg,
-                "shotsPer90": sc2_shots,
-                "sotPer90": sc2_sot,
-                "avgMinutes": "81' prom.",
-                "streak": "🔥 2G / 5 SOT en últ. 5 PJ",
-                "rivalDefenseTag": h_matchup_tag,
-                "rivalDefenseDetail": h_matchup_detail,
-                "goalOrAssist": sc2_ga,
-                "fit": sc2_raw.get("fit", 95),
-                "role": sc2_raw["role"],
-                "isStarter": True,
-                "isBlocked": False,
-                "inherited": False,
-                "prob": sc2_prob,
-                "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
-            }
+        # Armado de goleadores titulares verificados
+        sc1_inherited = bool(home_benched_star)
+        sc1_role = f"Pateador N°1 Titular de {home_name} (Hereda Penales)" if sc1_inherited else sc1_raw.get("role", f"Pateador N°1 de {home_name}")
+        sc1_notice = f"🔥 VALOR DETECTADO: {sc1_raw['name']} asume el ataque titular ante la suplencia hoy de {home_benched_star}" if sc1_inherited else sc1_raw.get("inheritanceNotice")
+
+        sc1 = {
+            "id": f"{fixture_id}_sc1_start",
+            "name": sc1_raw["name"],
+            "team": home_name,
+            "pos": sc1_raw.get("pos", "Delantero Centro Titular"),
+            "odds": sc1_odds,
+            "xG90": sc1_xg,
+            "shotsPer90": sc1_shots,
+            "sotPer90": sc1_sot,
+            "avgMinutes": "86' prom.",
+            "streak": "🔥 3G / 6 SOT en últ. 5 PJ",
+            "rivalDefenseTag": h_matchup_tag,
+            "rivalDefenseDetail": h_matchup_detail,
+            "goalOrAssist": sc1_ga,
+            "fit": sc1_raw.get("fit", 97),
+            "role": sc1_role,
+            "isStarter": True,
+            "isOfficialStarter": home_has_lineup,
+            "starterStatus": "TITULAR" if home_has_lineup else "PROBABLE",
+            "isBlocked": False,
+            "inherited": sc1_inherited,
+            "inheritanceNotice": sc1_notice,
+            "prob": sc1_prob,
+            "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
+        }
+
+        sc2 = {
+            "id": f"{fixture_id}_sc2_normal",
+            "name": sc2_raw["name"],
+            "team": home_name,
+            "pos": sc2_raw.get("pos", "Extremo / Atacante Titular"),
+            "odds": sc2_odds,
+            "xG90": sc2_xg,
+            "shotsPer90": sc2_shots,
+            "sotPer90": sc2_sot,
+            "avgMinutes": "81' prom.",
+            "streak": "🔥 2G / 5 SOT en últ. 5 PJ",
+            "rivalDefenseTag": h_matchup_tag,
+            "rivalDefenseDetail": h_matchup_detail,
+            "goalOrAssist": sc2_ga,
+            "fit": sc2_raw.get("fit", 95),
+            "role": sc2_raw.get("role", f"Segundo Atacante de {home_name}"),
+            "isStarter": True,
+            "isOfficialStarter": home_has_lineup,
+            "starterStatus": "TITULAR" if home_has_lineup else "PROBABLE",
+            "isBlocked": False,
+            "inherited": False,
+            "prob": sc2_prob,
+            "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
+        }
 
         sc3 = {
             "id": f"{fixture_id}_sc3",
             "name": sc3_raw["name"],
             "team": away_name,
-            "pos": sc3_raw["role"],
+            "pos": sc3_raw.get("pos", "Delantero Referente Titular"),
             "odds": sc3_odds,
             "xG90": sc3_xg,
             "shotsPer90": sc3_shots,
@@ -255,8 +212,10 @@ class PlayerPropsEngine:
             "rivalDefenseDetail": a_matchup_detail,
             "goalOrAssist": sc3_ga,
             "fit": sc3_raw.get("fit", 94),
-            "role": sc3_raw["role"],
+            "role": sc3_raw.get("role", f"Referente Ofensivo de {away_name}"),
             "isStarter": True,
+            "isOfficialStarter": away_has_lineup,
+            "starterStatus": "TITULAR" if away_has_lineup else "PROBABLE",
             "isBlocked": False,
             "inherited": False,
             "prob": sc3_prob,
@@ -265,14 +224,15 @@ class PlayerPropsEngine:
 
         scorers_pool = [sc1, sc2, sc3]
 
+        # Plan B táctico activado si una figura arrancó en la banca (ej: Jota)
         tactical_plan_b = None
-        if is_official and benched_p1:
+        if lineup_confirmed and home_benched_star:
             tactical_plan_b = {
-                "benchedPlayer": sc1["name"],
-                "replacementStarter": sc2["name"],
-                "newOdds": sc2["odds"],
-                "projectedMinutes": "85-90 min",
-                "tacticalRationale": f"{sc2['name']} asume la referencia ofensiva titular y la ejecución del penal ante la suplencia táctica de {sc1['name']}."
+                "benchedPlayer": home_benched_star,
+                "replacementStarter": sc1["name"],
+                "newOdds": sc1["odds"],
+                "projectedMinutes": "Suplente (En la Banca)",
+                "tacticalRationale": f"{sc1['name']} asume la referencia ofensiva titular y la ejecución del penal ante la suplencia hoy de {home_benched_star} (riesgo alto de minutos reducidos)."
             }
 
         # ---------------------------------------------------------------------
@@ -465,19 +425,37 @@ class PlayerPropsEngine:
             "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
         }
 
+        # Asignar estados oficiales a tarjetas y snipers
+        for sn in snipers_pool:
+            is_h = (sn.get("team") == home_name)
+            has_l = home_has_lineup if is_h else away_has_lineup
+            sn["isOfficialStarter"] = has_l
+            sn["starterStatus"] = "TITULAR" if has_l else "PROBABLE"
+            sn["isStarter"] = True
+            sn["isBlocked"] = False
+
+        for cd in [card1, card2, card3]:
+            is_h = (cd.get("team") == home_name)
+            has_l = home_has_lineup if is_h else away_has_lineup
+            cd["isOfficialStarter"] = has_l
+            cd["starterStatus"] = "TITULAR" if has_l else "PROBABLE"
+            cd["isStarter"] = True
+            cd["isBlocked"] = False
+
         cards_pool = [card1, card2, card3]
 
-        stage_code = "CONFIRMADO" if is_official else "PREVIA"
+        stage_code = "CONFIRMADO" if lineup_confirmed else "PREVIA"
         stage_label = (
             "🟢 ONCE OFICIAL CONFIRMADO (~60m antes — Métricas recalculadas)"
-            if is_official
+            if lineup_confirmed
             else "🟡 MODO PREVIA (Basado en XI Probable — Esperando confirmación oficial ~60m antes)"
         )
 
         return {
             "lineupStage": stage_code,
             "lineupStageLabel": stage_label,
-            "isOfficialConfirmed": is_official,
+            "isOfficialConfirmed": lineup_confirmed,
+            "hasOfficialLineup": lineup_confirmed,
             "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)",
             "topScorers": scorers_pool,
             "snipers": snipers_pool,
@@ -500,12 +478,8 @@ class PlayerPropsEngine:
         odds_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Devuelve tanto el estado Previa como el estado Confirmado con herencia de penales,
-        permitiendo sincronización instantánea y simulación interactiva con cuotas calibradas a Betano.
+        Devuelve tanto el estado Previa como el estado Confirmado con sincronización en vivo de ESPN.
         """
-        seed_h = int(hashlib.md5(f"{fixture_id}_{home_name}".encode()).hexdigest(), 16) % 1000
-        benched = (seed_h % 2 == 0)
-
         previa_state = cls._generate_state_analytics(
             fixture_id=fixture_id,
             home_name=home_name,
@@ -527,17 +501,19 @@ class PlayerPropsEngine:
             referee_name=referee_name,
             referee_yellows=referee_yellows,
             is_official=True,
-            benched_p1=benched,
+            benched_p1=False,
             league_code=league_code,
             home_team_id=home_team_id,
             away_team_id=away_team_id,
             odds_data=odds_data
         )
 
-        active = confirmed_state if is_official_confirmed else previa_state
+        # Si el partido tiene alineación oficial en vivo desde ESPN, activar CONFIRMADO
+        is_actually_confirmed = is_official_confirmed or confirmed_state.get("isOfficialConfirmed", False)
+        active = confirmed_state if is_actually_confirmed else previa_state
 
         return {
-            "currentStage": "CONFIRMADO" if is_official_confirmed else "PREVIA",
+            "currentStage": "CONFIRMADO" if is_actually_confirmed else "PREVIA",
             "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)",
             "previa": previa_state,
             "confirmed": confirmed_state,
