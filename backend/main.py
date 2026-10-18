@@ -172,10 +172,33 @@ def index_ui():
         frontend_path = os.path.join(FRONTEND_DIR, "index.html")
         if os.path.exists(frontend_path):
             with open(frontend_path, "r", encoding="utf-8") as f:
-                return f.read()
+                content = f.read()
+            return HTMLResponse(
+                content=content,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
     except Exception as e:
         pass
     return "<h1>BetanoQuant AI API Running</h1>"
+
+@app.get("/app.js")
+def get_app_js():
+    p = os.path.join(FRONTEND_DIR, "app.js")
+    if os.path.exists(p):
+        return FileResponse(
+            p,
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    raise HTTPException(status_code=404, detail="app.js not found")
 
 @app.get("/manifest.json")
 def get_manifest():
@@ -184,11 +207,22 @@ def get_manifest():
         return FileResponse(p, media_type="application/manifest+json")
     raise HTTPException(status_code=404, detail="Manifest not found")
 
+@app.get("/sw.js")
 @app.get("/service-worker.js")
 def get_service_worker():
-    p = os.path.join(FRONTEND_DIR, "service-worker.js")
+    p = os.path.join(FRONTEND_DIR, "sw.js")
+    if not os.path.exists(p):
+        p = os.path.join(FRONTEND_DIR, "service-worker.js")
     if os.path.exists(p):
-        return FileResponse(p, media_type="application/javascript")
+        return FileResponse(
+            p,
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     raise HTTPException(status_code=404, detail="Service worker not found")
 
 @app.get("/icon-192.png")

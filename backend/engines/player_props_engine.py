@@ -25,13 +25,16 @@ class PlayerPropsEngine:
         referee_name: str,
         referee_yellows: float,
         is_official: bool,
-        benched_p1: bool = False
+        benched_p1: bool = False,
+        league_code: str = "",
+        home_team_id: str = "",
+        away_team_id: str = ""
     ) -> Dict[str, Any]:
-        # Filtrado multi-fuente en tiempo real: Cero porteros en ataque y exclusión de bajas por lesión/suspensión
-        home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, fixture_id)
-        away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, fixture_id)
-        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id)
-        away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, fixture_id)
+        # Extracción 100% en vivo desde ESPN API: cero porteros en ataque y exclusión de bajas
+        home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, fixture_id, league_code, home_team_id)
+        away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, fixture_id, league_code, away_team_id)
+        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id, league_code, home_team_id)
+        away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, fixture_id, league_code, away_team_id)
 
         # Goleadores Reales Disponibles (100% jugadores de campo activos)
         scorers_pool = []
@@ -198,11 +201,14 @@ class PlayerPropsEngine:
         away_name: str,
         referee_name: str,
         referee_yellows: float,
-        is_official_confirmed: bool = False
+        is_official_confirmed: bool = False,
+        league_code: str = "",
+        home_team_id: str = "",
+        away_team_id: str = ""
     ) -> Dict[str, Any]:
         """
         Devuelve tanto el estado Previa como el estado Confirmado con herencia de penales,
-        permitiendo sincronización instantánea y simulación interactiva.
+        permitiendo sincronización instantánea y simulación interactiva con futbolistas 100% reales.
         """
         seed_h = int(hashlib.md5(f"{fixture_id}_{home_name}".encode()).hexdigest(), 16) % 1000
         benched = (seed_h % 2 == 0)
@@ -214,7 +220,10 @@ class PlayerPropsEngine:
             referee_name=referee_name,
             referee_yellows=referee_yellows,
             is_official=False,
-            benched_p1=False
+            benched_p1=False,
+            league_code=league_code,
+            home_team_id=home_team_id,
+            away_team_id=away_team_id
         )
 
         confirmed_state = cls._generate_state_analytics(
@@ -224,7 +233,10 @@ class PlayerPropsEngine:
             referee_name=referee_name,
             referee_yellows=referee_yellows,
             is_official=True,
-            benched_p1=benched
+            benched_p1=benched,
+            league_code=league_code,
+            home_team_id=home_team_id,
+            away_team_id=away_team_id
         )
 
         active = confirmed_state if is_official_confirmed else previa_state

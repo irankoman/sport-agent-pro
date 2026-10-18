@@ -250,8 +250,17 @@ class RealSportsService:
             home_comp = competitors[0] if competitors[0].get("homeAway") == "home" else competitors[1]
             away_comp = competitors[1] if competitors[0].get("homeAway") == "home" else competitors[0]
 
-            home_name = home_comp.get("team", {}).get("displayName", "Local")
-            away_name = away_comp.get("team", {}).get("displayName", "Visitante")
+            home_team_obj = home_comp.get("team", {})
+            away_team_obj = away_comp.get("team", {})
+            home_name = home_team_obj.get("displayName", "Local")
+            away_name = away_team_obj.get("displayName", "Visitante")
+            home_team_id = str(home_team_obj.get("id") or home_comp.get("id", ""))
+            away_team_id = str(away_team_obj.get("id") or away_comp.get("id", ""))
+            espn_event_id = str(ev.get("id", ""))
+            espn_league_code = LEAGUE_CONFIG[l_key]["espn_code"]
+
+            MultiSourceRosterEngine.register_team(espn_league_code, home_team_id, home_name)
+            MultiSourceRosterEngine.register_team(espn_league_code, away_team_id, away_name)
 
             raw_date = ev.get("date", "")
             date_label, day_id, full_day, match_date_str, match_date_obj = cls.format_date_spanish(raw_date)
@@ -347,12 +356,12 @@ class RealSportsService:
             med_odds = round(odds_data["home_win_odds"] * 1.35, 2)
             high_odds = round(odds_data["home_win_odds"] * odds_data["card_odds"] * 1.70, 2)
 
-            home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, ev_id)
-            home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, ev_id)
-            away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, ev_id)
-            away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, ev_id)
-            home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, ev_id)
-            away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, ev_id)
+            home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, ev_id, league_code=espn_league_code, team_id=home_team_id)
+            home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, ev_id, league_code=espn_league_code, team_id=home_team_id)
+            away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, ev_id, league_code=espn_league_code, team_id=away_team_id)
+            away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, ev_id, league_code=espn_league_code, team_id=away_team_id)
+            home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, ev_id, league_code=espn_league_code, team_id=home_team_id)
+            away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, ev_id, league_code=espn_league_code, team_id=away_team_id)
 
             h_sc = home_avail_scorers[0]
             h_card = home_avail_cards[0]
@@ -458,7 +467,10 @@ class RealSportsService:
                 away_name=away_name,
                 referee_name=ref_stats.name,
                 referee_yellows=ref_stats.yellow_cards_avg,
-                is_official_confirmed=is_official
+                is_official_confirmed=is_official,
+                league_code=espn_league_code,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id
             )
 
             # Analítica estadística y táctica profunda (Tiros al arco, clima, matriz córners/xG, H2H, psicología, Bet Builder)
@@ -471,7 +483,10 @@ class RealSportsService:
                 referee_stats=ref_stats,
                 odds_data=odds_data,
                 player_props=player_analytics,
-                is_official_confirmed=is_official
+                is_official_confirmed=is_official,
+                league_code=espn_league_code,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id
             )
 
             b2_picks = []

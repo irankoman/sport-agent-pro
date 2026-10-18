@@ -29,7 +29,10 @@ class DeepStatsEngine:
         referee_stats: Any,
         odds_data: Dict[str, Any],
         player_props: Dict[str, Any],
-        is_official_confirmed: bool = False
+        is_official_confirmed: bool = False,
+        league_code: str = "",
+        home_team_id: str = "",
+        away_team_id: str = ""
     ) -> Dict[str, Any]:
         """
         Genera el paquete completo de analítica cruzada para ambos estados (Previa y Confirmado)
@@ -43,7 +46,10 @@ class DeepStatsEngine:
             referee_stats=referee_stats,
             odds_data=odds_data,
             player_state=player_props.get("previa", player_props),
-            is_official=False
+            is_official=False,
+            league_code=league_code,
+            home_team_id=home_team_id,
+            away_team_id=away_team_id
         )
 
         confirmed = cls._generate_state_deep_analytics(
@@ -55,7 +61,10 @@ class DeepStatsEngine:
             referee_stats=referee_stats,
             odds_data=odds_data,
             player_state=player_props.get("confirmed", player_props),
-            is_official=True
+            is_official=True,
+            league_code=league_code,
+            home_team_id=home_team_id,
+            away_team_id=away_team_id
         )
 
         active = confirmed if is_official_confirmed else previa
@@ -78,7 +87,10 @@ class DeepStatsEngine:
         referee_stats: Any,
         odds_data: Dict[str, Any],
         player_state: Dict[str, Any],
-        is_official: bool
+        is_official: bool,
+        league_code: str = "",
+        home_team_id: str = "",
+        away_team_id: str = ""
     ) -> Dict[str, Any]:
         seed = cls._get_hash(f"{fixture_id}_{home_name}_{away_name}")
 
@@ -99,7 +111,7 @@ class DeepStatsEngine:
         base_home_ontarget = round(base_home_shots * 0.38, 1)
         base_away_ontarget = round(base_away_shots * 0.35, 1)
 
-        away_keeper = get_team_goalkeeper(away_name)
+        away_keeper = get_team_goalkeeper(away_name, league_code, away_team_id)
 
         if is_wet_fast:
             shot_mod = 1.14
@@ -148,9 +160,9 @@ class DeepStatsEngine:
         total_shots = round(final_home_shots + final_away_shots, 1)
         total_ontarget = round(final_home_ontarget + final_away_ontarget, 1)
 
-        # Identificar shooters según alineación activa
-        home_prof = get_team_roster(home_name)
-        away_prof = get_team_roster(away_name)
+        # Identificar shooters según alineación activa viva de ESPN
+        home_prof = get_team_roster(home_name, league_code, home_team_id, fixture_id)
+        away_prof = get_team_roster(away_name, league_code, away_team_id, fixture_id)
         scorers = player_state.get("topScorers", [])
         sc1 = scorers[0] if len(scorers) > 0 else {"name": home_prof["scorers"][0]["name"], "team": home_name, "isBlocked": False, "odds": 2.20}
         sc2 = scorers[1] if len(scorers) > 1 else {"name": home_prof["scorers"][1]["name"] if len(home_prof["scorers"]) > 1 else home_prof["scorers"][0]["name"], "team": home_name, "isBlocked": False, "odds": 2.70}
@@ -332,7 +344,7 @@ class DeepStatsEngine:
         # =========================================================================
         # 4. RADIOGRAFÍA FÍSICA Y MENTAL / PSICOLÓGICA DE JUGADORES (FUTBOLISTAS REALES)
         # =========================================================================
-        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id)
+        home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, fixture_id, league_code, home_team_id)
         home_card_p1 = home_avail_cards[0] if home_avail_cards else home_prof["cards"][0]
         home_players = [
             {
@@ -430,8 +442,8 @@ class DeepStatsEngine:
             }
         ]
 
-        home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, fixture_id)
-        away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, fixture_id)
+        home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, fixture_id, league_code, home_team_id)
+        away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, fixture_id, league_code, away_team_id)
 
         squad_radiography = {
             "home": home_players,
