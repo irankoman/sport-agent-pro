@@ -128,7 +128,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Gonzalo Montes', 'role': 'Especialista en tiros libres y segunda jugada', 'xG': 0.38, 'fit': 94, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.90}
         ],
         'cards': [
-            {'name': 'Benjamín Gazzolo', 'role': 'Central de choque y marca al cuerpo', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Reincidente en faltas tácticas', 'baseOdds': 2.35, 'prob': 71},
+            {'name': 'Benjamín Gazzolo', 'role': 'Zaguero de choque y marca al cuerpo', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Reincidente en faltas tácticas', 'baseOdds': 2.35, 'prob': 71},
             {'name': 'Claudio Sepúlveda', 'role': 'Pivote de equilibrio y corte frontal', 'fit': 91, 'dribbled': 2.8, 'alert': '⚠️ Entradas en zona 14 para frenar avances', 'baseOdds': 2.55, 'prob': 65},
             {'name': 'Imanol González', 'role': 'Duelos individuales en área chica', 'fit': 89, 'dribbled': 1.9, 'alert': '⚠️ Agarrones en córners y tiro libre', 'baseOdds': 2.80, 'prob': 57}
         ]
@@ -141,7 +141,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Bernardo Cerezo', 'role': 'Llegada aérea en balón detenido', 'xG': 0.30, 'fit': 92, 'penalties': False, 'freeKicks': False, 'baseOdds': 4.50}
         ],
         'cards': [
-            {'name': 'Rafael Caroca', 'role': 'Central de marca agresiva y anticipo', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.40, 'prob': 69},
+            {'name': 'Rafael Caroca', 'role': 'Zaguero de marca agresiva y anticipo', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.40, 'prob': 69},
             {'name': 'Osvaldo Bosso', 'role': 'Intercepción frontal en medioterreno', 'fit': 89, 'dribbled': 2.9, 'alert': '⚠️ Duelo físico intenso y tarjetas reiteradas', 'baseOdds': 2.60, 'prob': 64},
             {'name': 'Lorenzo Reyes', 'role': 'Presión medular y faltas de contención', 'fit': 91, 'dribbled': 2.1, 'alert': '⚠️ Fricción en corte de salida rival', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -180,7 +180,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Dilan Acevedo', 'role': 'Remate de media distancia', 'xG': 0.34, 'fit': 91, 'penalties': False, 'freeKicks': False, 'baseOdds': 4.30}
         ],
         'cards': [
-            {'name': 'Lautaro Rigazzi', 'role': 'Central de choque y marca zonal', 'fit': 92, 'dribbled': 2.6, 'alert': '⚡ Cortes defensivos en transiciones', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Lautaro Rigazzi', 'role': 'Zaguero de choque y marca zonal', 'fit': 92, 'dribbled': 2.6, 'alert': '⚡ Cortes defensivos en transiciones', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Sebastián Silva', 'role': 'Intercepción agresiva en campo abierto', 'fit': 89, 'dribbled': 2.8, 'alert': '⚠️ Duelo individual al límite', 'baseOdds': 2.65, 'prob': 63},
             {'name': 'Fabrizio Manzo', 'role': 'Corte sistemático en mediocampo', 'fit': 90, 'dribbled': 2.2, 'alert': '⚠️ Roce reiterado en recuperación', 'baseOdds': 2.80, 'prob': 57}
         ]
@@ -299,7 +299,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Dejan Kulusevski', 'role': 'Llegada y diagonales ofensivas', 'xG': 0.44, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.50}
         ],
         'cards': [
-            {'name': 'Cristian Romero', 'role': 'Central stopper de choque frontal agresivo', 'fit': 95, 'dribbled': 2.8, 'alert': '⚡ Altísimo riesgo de tarjeta por entradas duras', 'baseOdds': 2.20, 'prob': 75},
+            {'name': 'Cristian Romero', 'role': 'Zaguero stopper de choque frontal agresivo', 'fit': 95, 'dribbled': 2.8, 'alert': '⚡ Altísimo riesgo de tarjeta por entradas duras', 'baseOdds': 2.20, 'prob': 75},
             {'name': 'Pedro Porro', 'role': 'Carrilero exigido en repliegue defensivo', 'fit': 85, 'dribbled': 3.3, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.55, 'prob': 64},
             {'name': 'Pape Matar Sarr', 'role': 'Presión y corte en transiciones rápidas', 'fit': 92, 'dribbled': 2.3, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.80, 'prob': 57}
         ]
@@ -312,7 +312,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Leon Bailey', 'role': 'Desborde y remate cruzado', 'xG': 0.48, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.20}
         ],
         'cards': [
-            {'name': 'Diego Carlos', 'role': 'Central físico y choque en área grande', 'fit': 91, 'dribbled': 2.7, 'alert': '⚡ Duelos individuales agresivos', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Diego Carlos', 'role': 'Zaguero físico y choque en área grande', 'fit': 91, 'dribbled': 2.7, 'alert': '⚡ Duelos individuales agresivos', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'John McGinn', 'role': 'Volante de fricción y presión alta', 'fit': 93, 'dribbled': 2.9, 'alert': '⚠️ Faltas tácticas por corte reiterado', 'baseOdds': 2.50, 'prob': 65},
             {'name': 'Ezri Konsa', 'role': 'Corte forzado de contraataques', 'fit': 94, 'dribbled': 1.8, 'alert': '⚠️ Roce al límite en última línea', 'baseOdds': 2.90, 'prob': 54}
         ]
@@ -351,7 +351,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Mikkel Damsgaard', 'role': 'Balón parado y tiros libres', 'xG': 0.36, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 4.20}
         ],
         'cards': [
-            {'name': 'Nathan Collins', 'role': 'Central stopper y balones divididos', 'fit': 94, 'dribbled': 2.5, 'alert': '⚡ Choques constantes en área grande', 'baseOdds': 2.45, 'prob': 67},
+            {'name': 'Nathan Collins', 'role': 'Zaguero stopper y balones divididos', 'fit': 94, 'dribbled': 2.5, 'alert': '⚡ Choques constantes en área grande', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Christian Nørgaard', 'role': 'Pivote defensivo de corte táctico', 'fit': 92, 'dribbled': 2.8, 'alert': '⚠️ Faltas tácticas en zona de transición', 'baseOdds': 2.50, 'prob': 65},
             {'name': 'Ethan Pinnock', 'role': 'Duelos aéreos y despejes comprometidos', 'fit': 93, 'dribbled': 1.8, 'alert': '⚠️ Fricción en córners rivales', 'baseOdds': 2.85, 'prob': 55}
         ]
@@ -365,7 +365,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Saša Lukić', 'role': 'Pivote de presión y corte de contragolpe', 'fit': 91, 'dribbled': 3.0, 'alert': '⚡ Reincidente en faltas de amonestación', 'baseOdds': 2.35, 'prob': 70},
-            {'name': 'Calvin Bassey', 'role': 'Central físico y choque en campo abierto', 'fit': 93, 'dribbled': 2.6, 'alert': '⚠️ Cortes forzados por velocidad', 'baseOdds': 2.55, 'prob': 64},
+            {'name': 'Calvin Bassey', 'role': 'Zaguero físico y choque en campo abierto', 'fit': 93, 'dribbled': 2.6, 'alert': '⚠️ Cortes forzados por velocidad', 'baseOdds': 2.55, 'prob': 64},
             {'name': 'Antonee Robinson', 'role': 'Marcaje exigido en carril exterior', 'fit': 90, 'dribbled': 2.9, 'alert': '⚠️ Duelo desgastante por banda', 'baseOdds': 2.70, 'prob': 60}
         ]
     },
@@ -391,7 +391,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Lewis Cook', 'role': 'Pivote defensivo y corte de contragolpe', 'fit': 93, 'dribbled': 2.9, 'alert': '⚡ Faltas tácticas sistemáticas en zona 14', 'baseOdds': 2.35, 'prob': 70},
-            {'name': 'Illia Zabarnyi', 'role': 'Central stopper y balones aéreos', 'fit': 94, 'dribbled': 2.4, 'alert': '⚠️ Choques físicos en área propia', 'baseOdds': 2.60, 'prob': 63},
+            {'name': 'Illia Zabarnyi', 'role': 'Zaguero stopper y balones aéreos', 'fit': 94, 'dribbled': 2.4, 'alert': '⚠️ Choques físicos en área propia', 'baseOdds': 2.60, 'prob': 63},
             {'name': 'Milos Kerkez', 'role': 'Marcaje férreo y repliegue forzado en banda', 'fit': 88, 'dribbled': 3.2, 'alert': '⚠️ Infracciones por velocidad exterior', 'baseOdds': 2.70, 'prob': 59}
         ]
     },
@@ -404,7 +404,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Ryan Yates', 'role': 'Pivote de choque y fricción física constante', 'fit': 94, 'dribbled': 3.2, 'alert': '⚡ Altísima reincidencia en faltas tácticas', 'baseOdds': 2.20, 'prob': 75},
-            {'name': 'Murillo', 'role': 'Central stopper agresivo en anticipo', 'fit': 93, 'dribbled': 2.5, 'alert': '⚠️ Entradas contundentes al límite', 'baseOdds': 2.50, 'prob': 65},
+            {'name': 'Murillo', 'role': 'Zaguero stopper agresivo en anticipo', 'fit': 93, 'dribbled': 2.5, 'alert': '⚠️ Entradas contundentes al límite', 'baseOdds': 2.50, 'prob': 65},
             {'name': 'Nikola Milenković', 'role': 'Duelos aéreos y agarrones en área', 'fit': 95, 'dribbled': 1.9, 'alert': '⚠️ Fricción en córners rivales', 'baseOdds': 2.75, 'prob': 58}
         ]
     },
@@ -430,7 +430,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Sam Morsy', 'role': 'Capitán y pivote de corte agresivo', 'fit': 94, 'dribbled': 3.3, 'alert': '⚡ Reincidente en faltas tácticas de corte', 'baseOdds': 2.15, 'prob': 76},
-            {'name': 'Jacob Greaves', 'role': 'Central stopper y balones aéreos', 'fit': 93, 'dribbled': 2.6, 'alert': '⚠️ Choques directos en área chica', 'baseOdds': 2.50, 'prob': 66},
+            {'name': 'Jacob Greaves', 'role': 'Zaguero stopper y balones aéreos', 'fit': 93, 'dribbled': 2.6, 'alert': '⚠️ Choques directos en área chica', 'baseOdds': 2.50, 'prob': 66},
             {'name': 'Leif Davis', 'role': 'Marcaje exigido en banda exterior', 'fit': 84, 'dribbled': 3.4, 'alert': '⚠️ Infracciones por velocidad rival', 'baseOdds': 2.65, 'prob': 62}
         ]
     },
@@ -470,7 +470,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Alexander Sørloth', 'role': 'Remate de área y juego aéreo', 'xG': 0.60, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 2.70}
         ],
         'cards': [
-            {'name': 'Robin Le Normand', 'role': 'Central stopper agresivo en el choque', 'fit': 94, 'dribbled': 2.6, 'alert': '⚡ Faltas tácticas en balones divididos', 'baseOdds': 2.30, 'prob': 71},
+            {'name': 'Robin Le Normand', 'role': 'Zaguero stopper agresivo en el choque', 'fit': 94, 'dribbled': 2.6, 'alert': '⚡ Faltas tácticas en balones divididos', 'baseOdds': 2.30, 'prob': 71},
             {'name': 'José María Giménez', 'role': 'Duelo físico aéreo y agarrones en área', 'fit': 89, 'dribbled': 1.8, 'alert': '⚠️ Choques físicos en córners y tiros libres', 'baseOdds': 2.50, 'prob': 65},
             {'name': 'Rodrigo De Paul', 'role': 'Presión medular y faltas de contención', 'fit': 93, 'dribbled': 2.8, 'alert': '⚠️ Roce reiterado y protestas arbitrales', 'baseOdds': 2.40, 'prob': 68}
         ]
@@ -483,7 +483,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Oihan Sancet', 'role': 'Llegador de segunda línea y remate', 'xG': 0.50, 'fit': 93, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.10}
         ],
         'cards': [
-            {'name': 'Dani Vivian', 'role': 'Central de choque y marca al hombre', 'fit': 95, 'dribbled': 2.4, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Dani Vivian', 'role': 'Zaguero de choque y marca al hombre', 'fit': 95, 'dribbled': 2.4, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Yeray Álvarez', 'role': 'Zaguero de anticipo y balones aéreos', 'fit': 91, 'dribbled': 2.2, 'alert': '⚠️ Fricción en área chica', 'baseOdds': 2.65, 'prob': 62},
             {'name': 'Beñat Prados', 'role': 'Pivote de corte frontal en transiciones', 'fit': 92, 'dribbled': 2.9, 'alert': '⚠️ Faltas tácticas en zona de inicio rival', 'baseOdds': 2.55, 'prob': 64}
         ]
@@ -496,7 +496,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Brais Méndez', 'role': 'Balón parado y tiros libres directos', 'xG': 0.44, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.50}
         ],
         'cards': [
-            {'name': 'Igor Zubeldia', 'role': 'Central stopper y faltas de último recurso', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Reincidente en cortes de contraataque', 'baseOdds': 2.35, 'prob': 70},
+            {'name': 'Igor Zubeldia', 'role': 'Zaguero stopper y faltas de último recurso', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Reincidente en cortes de contraataque', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Jon Aramburu', 'role': 'Lateral de marca intensa y repliegue', 'fit': 85, 'dribbled': 3.4, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.50, 'prob': 66},
             {'name': 'Martín Zubimendi', 'role': 'Equilibrio defensivo y corte sistemático', 'fit': 95, 'dribbled': 2.1, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.80, 'prob': 57}
         ]
@@ -522,7 +522,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Pablo Fornals', 'role': 'Llegada de segunda línea y remate', 'xG': 0.40, 'fit': 93, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.70}
         ],
         'cards': [
-            {'name': 'Diego Llorente', 'role': 'Central de choque y balones divididos', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Diego Llorente', 'role': 'Zaguero de choque y balones divididos', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Ezequiel Ávila', 'role': 'Delantero de presión física desmedida', 'fit': 88, 'dribbled': 2.4, 'alert': '⚠️ Amonestaciones por juego brusco y protestas', 'baseOdds': 2.25, 'prob': 73},
             {'name': 'Marc Roca', 'role': 'Contención y corte en zona medular', 'fit': 91, 'dribbled': 2.5, 'alert': '⚠️ Faltas tácticas para frenar contraataques', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -535,7 +535,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Saúl Ñíguez', 'role': 'Llegada aérea en segunda jugada', 'xG': 0.38, 'fit': 92, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.90}
         ],
         'cards': [
-            {'name': 'Loïc Badé', 'role': 'Central agresivo en balones aéreos y corte', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.30, 'prob': 72},
+            {'name': 'Loïc Badé', 'role': 'Zaguero agresivo en balones aéreos y corte', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.30, 'prob': 72},
             {'name': 'Nemanja Gudelj', 'role': 'Stopper de choque y marcaje al límite', 'fit': 91, 'dribbled': 2.5, 'alert': '⚠️ Reincidente en amonestaciones de zona', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Adrià Pedrosa', 'role': 'Marcaje en banda y corte de carrera', 'fit': 84, 'dribbled': 3.3, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.60, 'prob': 63}
         ]
@@ -548,7 +548,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Jonathan Bamba', 'role': 'Desborde y remate exterior', 'xG': 0.42, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.60}
         ],
         'cards': [
-            {'name': 'Carl Starfelt', 'role': 'Central de choque y juego aéreo', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados en área propia', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Carl Starfelt', 'role': 'Zaguero de choque y juego aéreo', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados en área propia', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Óscar Mingueza', 'role': 'Marcaje en banda y faltas tácticas', 'fit': 91, 'dribbled': 2.9, 'alert': '⚠️ Infracciones reiteradas en repliegue', 'baseOdds': 2.55, 'prob': 64},
             {'name': 'Jailson', 'role': 'Pivote defensivo de corte rudo', 'fit': 88, 'dribbled': 2.7, 'alert': '⚠️ Roce constante en transiciones', 'baseOdds': 2.65, 'prob': 61}
         ]
@@ -561,7 +561,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Rubén García', 'role': 'Especialista en balones parados y centros', 'xG': 0.38, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.80}
         ],
         'cards': [
-            {'name': 'Alejandro Catena', 'role': 'Central stopper y balones divididos', 'fit': 94, 'dribbled': 2.6, 'alert': '⚡ Choques constantes en balones aéreos', 'baseOdds': 2.35, 'prob': 70},
+            {'name': 'Alejandro Catena', 'role': 'Zaguero stopper y balones divididos', 'fit': 94, 'dribbled': 2.6, 'alert': '⚡ Choques constantes en balones aéreos', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Lucas Torró', 'role': 'Pivote de equilibrio y faltas tácticas', 'fit': 92, 'dribbled': 2.8, 'alert': '⚠️ Frecuencia alta de amonestaciones de zona', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Enzo Boyomo', 'role': 'Anticipo al corte y duelos físicos', 'fit': 93, 'dribbled': 2.1, 'alert': '⚠️ Entradas contundentes en campo abierto', 'baseOdds': 2.70, 'prob': 60}
         ]
@@ -574,7 +574,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Bertuğ Yıldırım', 'role': 'Juego aéreo y remate en área chica', 'xG': 0.42, 'fit': 92, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.60}
         ],
         'cards': [
-            {'name': 'Djené Dakonam', 'role': 'Central ultra agresivo y marca al cuerpo', 'fit': 95, 'dribbled': 3.2, 'alert': '⚡ Altísimo historial disciplinario de amonestaciones', 'baseOdds': 2.15, 'prob': 77},
+            {'name': 'Djené Dakonam', 'role': 'Zaguero ultra agresivo y marca al cuerpo', 'fit': 95, 'dribbled': 3.2, 'alert': '⚡ Altísimo historial disciplinario de amonestaciones', 'baseOdds': 2.15, 'prob': 77},
             {'name': 'Omar Alderete', 'role': 'Stopper de gran fuerza física y entradas duras', 'fit': 93, 'dribbled': 2.9, 'alert': '⚠️ Faltas tácticas constantes de último hombre', 'baseOdds': 2.25, 'prob': 73},
             {'name': 'Luis Milla', 'role': 'Intercepción forzada y corte de contragolpe', 'fit': 91, 'dribbled': 2.4, 'alert': '⚠️ Roce reiterado en el círculo central', 'baseOdds': 2.65, 'prob': 62}
         ]
@@ -587,7 +587,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Toni Martínez', 'role': 'Definición de área y segundas jugadas', 'xG': 0.45, 'fit': 92, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.40}
         ],
         'cards': [
-            {'name': 'Abdel Abqar', 'role': 'Central stopper agresivo en el anticipo', 'fit': 94, 'dribbled': 2.8, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.35, 'prob': 71},
+            {'name': 'Abdel Abqar', 'role': 'Zaguero stopper agresivo en el anticipo', 'fit': 94, 'dribbled': 2.8, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.35, 'prob': 71},
             {'name': 'Nahuel Tenaglia', 'role': 'Marcaje férreo en banda y repliegue', 'fit': 88, 'dribbled': 3.1, 'alert': '⚠️ Duelo desgastante por velocidad', 'baseOdds': 2.55, 'prob': 64},
             {'name': 'Antonio Blanco', 'role': 'Contención y corte en zona 14', 'fit': 92, 'dribbled': 2.3, 'alert': '⚠️ Faltas tácticas reiteradas', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -600,7 +600,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Jofre Carreras', 'role': 'Desborde y remate desde fuera', 'xG': 0.40, 'fit': 93, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.70}
         ],
         'cards': [
-            {'name': 'Marash Kumbulla', 'role': 'Central de choque y balones divididos', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.35, 'prob': 70},
+            {'name': 'Marash Kumbulla', 'role': 'Zaguero de choque y balones divididos', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Leandro Cabrera', 'role': 'Stopper de marca dura y agarrones', 'fit': 92, 'dribbled': 2.5, 'alert': '⚠️ Infracciones en juego aéreo', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Carlos Romero', 'role': 'Marcaje en banda y corte de carrera', 'fit': 85, 'dribbled': 3.3, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.65, 'prob': 62}
         ]
@@ -628,7 +628,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Teun Koopmeiners', 'role': 'Especialista en Media Distancia y Balón Parado', 'xG': 0.48, 'fit': 94, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.20}
         ],
         'cards': [
-            {'name': 'Federico Gatti', 'role': 'Central stopper agresivo de choque frontal', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Marcaje al hombre agresivo en área grande', 'baseOdds': 2.30, 'prob': 72},
+            {'name': 'Federico Gatti', 'role': 'Zaguero stopper agresivo de choque frontal', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Marcaje al hombre agresivo en área grande', 'baseOdds': 2.30, 'prob': 72},
             {'name': 'Danilo', 'role': 'Líder defensivo y cortes de emergencia', 'fit': 88, 'dribbled': 2.6, 'alert': '⚠️ Faltas tácticas de último recurso', 'baseOdds': 2.60, 'prob': 63},
             {'name': 'Manuel Locatelli', 'role': 'Pivote de equilibrio y corte de transiciones', 'fit': 93, 'dribbled': 2.3, 'alert': '⚠️ Fricción constante en zona 14', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -643,7 +643,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         'cards': [
             {'name': 'Théo Hernández', 'role': 'Carrilero de alta fricción y temperamento volátil', 'fit': 94, 'dribbled': 3.1, 'alert': '⚡ Tarjetas reiteradas por choque y reclamos', 'baseOdds': 2.25, 'prob': 74},
             {'name': 'Youssouf Fofana', 'role': 'Pivote defensivo de corte frontal duro', 'fit': 93, 'dribbled': 2.8, 'alert': '⚠️ Infracciones tácticas en campo propio', 'baseOdds': 2.45, 'prob': 67},
-            {'name': 'Fikayo Tomori', 'role': 'Central veloz de anticipación y choque', 'fit': 92, 'dribbled': 2.0, 'alert': '⚠️ Cortes al límite en campo abierto', 'baseOdds': 2.80, 'prob': 56}
+            {'name': 'Fikayo Tomori', 'role': 'Zaguero veloz de anticipación y choque', 'fit': 92, 'dribbled': 2.0, 'alert': '⚠️ Cortes al límite en campo abierto', 'baseOdds': 2.80, 'prob': 56}
         ]
     },
     'napoli': {
@@ -654,7 +654,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Scott McTominay', 'role': 'Llegador de segunda línea y remate de cabeza', 'xG': 0.50, 'fit': 95, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.10}
         ],
         'cards': [
-            {'name': 'Alessandro Buongiorno', 'role': 'Central stopper dominante en el cuerpo a cuerpo', 'fit': 95, 'dribbled': 2.4, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Alessandro Buongiorno', 'role': 'Zaguero stopper dominante en el cuerpo a cuerpo', 'fit': 95, 'dribbled': 2.4, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Giovanni Di Lorenzo', 'role': 'Lateral de marca intensa y repliegue rápido', 'fit': 93, 'dribbled': 2.9, 'alert': '⚠️ Duelo desgastante por velocidad', 'baseOdds': 2.60, 'prob': 63},
             {'name': 'André-Frank Zambo Anguissa', 'role': 'Pivote físico de contención y choque', 'fit': 92, 'dribbled': 2.5, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.70, 'prob': 59}
         ]
@@ -667,7 +667,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Charles De Ketelaere', 'role': 'Asistencias y remate colocado', 'xG': 0.48, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.20}
         ],
         'cards': [
-            {'name': 'Isak Hien', 'role': 'Central stopper de marcaje hombre a hombre', 'fit': 94, 'dribbled': 2.8, 'alert': '⚡ Duelos físicos extremos y faltas tácticas', 'baseOdds': 2.25, 'prob': 73},
+            {'name': 'Isak Hien', 'role': 'Zaguero stopper de marcaje hombre a hombre', 'fit': 94, 'dribbled': 2.8, 'alert': '⚡ Duelos físicos extremos y faltas tácticas', 'baseOdds': 2.25, 'prob': 73},
             {'name': 'Marten de Roon', 'role': 'Capitán y pivote de corte reiterado', 'fit': 95, 'dribbled': 2.9, 'alert': '⚠️ Frecuencia muy alta de amonestaciones de zona', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Éderson', 'role': 'Presión asfixiante en campo rival', 'fit': 93, 'dribbled': 2.3, 'alert': '⚠️ Faltas tácticas en salida', 'baseOdds': 2.70, 'prob': 60}
         ]
@@ -680,9 +680,9 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Matías Soulé', 'role': 'Desborde y remate de zurda', 'xG': 0.45, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.30}
         ],
         'cards': [
-            {'name': 'Gianluca Mancini', 'role': 'Central temperamental y choque continuo', 'fit': 95, 'dribbled': 3.0, 'alert': '⚡ Altísimo récord de amonestaciones y protestas', 'baseOdds': 2.15, 'prob': 76},
+            {'name': 'Gianluca Mancini', 'role': 'Zaguero temperamental y choque continuo', 'fit': 95, 'dribbled': 3.0, 'alert': '⚡ Altísimo récord de amonestaciones y protestas', 'baseOdds': 2.15, 'prob': 76},
             {'name': 'Bryan Cristante', 'role': 'Pivote defensivo y faltas tácticas de corte', 'fit': 93, 'dribbled': 2.7, 'alert': '⚠️ Infracciones sistemáticas en zona de inicio', 'baseOdds': 2.40, 'prob': 68},
-            {'name': 'Evan Ndicka', 'role': 'Central stopper y balones aéreos', 'fit': 92, 'dribbled': 2.1, 'alert': '⚠️ Duelo directo en córners rivales', 'baseOdds': 2.75, 'prob': 58}
+            {'name': 'Evan Ndicka', 'role': 'Zaguero stopper y balones aéreos', 'fit': 92, 'dribbled': 2.1, 'alert': '⚠️ Duelo directo en córners rivales', 'baseOdds': 2.75, 'prob': 58}
         ]
     },
     'lazio': {
@@ -693,7 +693,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Boulaye Dia', 'role': 'Definición rápida y diagonales al área', 'xG': 0.52, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 2.95}
         ],
         'cards': [
-            {'name': 'Mario Gila', 'role': 'Central stopper agresivo en anticipación', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.40, 'prob': 69},
+            {'name': 'Mario Gila', 'role': 'Zaguero stopper agresivo en anticipación', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.40, 'prob': 69},
             {'name': 'Mattéo Guendouzi', 'role': 'Volante de choque, fricción y quejas arbitrales', 'fit': 94, 'dribbled': 2.9, 'alert': '⚠️ Amonestaciones por juego brusco y protestas', 'baseOdds': 2.30, 'prob': 71},
             {'name': 'Alessio Romagnoli', 'role': 'Líder defensivo y cortes al hombre', 'fit': 91, 'dribbled': 1.9, 'alert': '⚠️ Fricción en área propia', 'baseOdds': 2.80, 'prob': 56}
         ]
@@ -706,7 +706,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Andrea Colpani', 'role': 'Remate de media distancia y centros', 'xG': 0.44, 'fit': 93, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.50}
         ],
         'cards': [
-            {'name': 'Lucas Martínez Quarta', 'role': 'Central agresivo con gol y faltas tácticas', 'fit': 93, 'dribbled': 2.8, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.30, 'prob': 72},
+            {'name': 'Lucas Martínez Quarta', 'role': 'Zaguero agresivo con gol y faltas tácticas', 'fit': 93, 'dribbled': 2.8, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.30, 'prob': 72},
             {'name': 'Luca Ranieri', 'role': 'Stopper de marca dura y roces constantes', 'fit': 92, 'dribbled': 2.6, 'alert': '⚠️ Reincidente en amonestaciones de zona', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Danilo Cataldi', 'role': 'Pivote defensivo y corte sistemático', 'fit': 90, 'dribbled': 2.3, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.70, 'prob': 60}
         ]
@@ -719,7 +719,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Dan Ndoye', 'role': 'Desborde y remate exterior', 'xG': 0.45, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.40}
         ],
         'cards': [
-            {'name': 'Sam Beukema', 'role': 'Central stopper y duelos aéreos', 'fit': 94, 'dribbled': 2.4, 'alert': '⚡ Cortes defensivos en transiciones', 'baseOdds': 2.45, 'prob': 67},
+            {'name': 'Sam Beukema', 'role': 'Zaguero stopper y duelos aéreos', 'fit': 94, 'dribbled': 2.4, 'alert': '⚡ Cortes defensivos en transiciones', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Jhon Lucumí', 'role': 'Zaguero de choque físico y anticipación', 'fit': 93, 'dribbled': 2.6, 'alert': '⚠️ Choques directos en balones divididos', 'baseOdds': 2.40, 'prob': 69},
             {'name': 'Remo Freuler', 'role': 'Pivote de equilibrio y faltas tácticas', 'fit': 92, 'dribbled': 2.2, 'alert': '⚠️ Faltas tácticas en zona 14', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -732,7 +732,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Samuele Ricci', 'role': 'Creación y remate desde media distancia', 'xG': 0.38, 'fit': 94, 'penalties': False, 'freeKicks': True, 'baseOdds': 4.10}
         ],
         'cards': [
-            {'name': 'Guillermo Maripán', 'role': 'Central chileno de gran choque y fricción', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.30, 'prob': 72},
+            {'name': 'Guillermo Maripán', 'role': 'Zaguero chileno de gran choque y fricción', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Faltas directas en frenado de transiciones', 'baseOdds': 2.30, 'prob': 72},
             {'name': 'Saúl Coco', 'role': 'Stopper agresivo en anticipo de área', 'fit': 93, 'dribbled': 2.5, 'alert': '⚠️ Duelo físico intenso y tarjetas reiteradas', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Adrien Tameze', 'role': 'Pivote de corte y entradas contundentes', 'fit': 90, 'dribbled': 2.6, 'alert': '⚠️ Infracciones en salida rival', 'baseOdds': 2.70, 'prob': 60}
         ]
@@ -745,7 +745,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Gabriel Strefezza', 'role': 'Desborde y remate exterior', 'xG': 0.44, 'fit': 94, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.50}
         ],
         'cards': [
-            {'name': 'Alberto Dossena', 'role': 'Central stopper y balones aéreos', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Alberto Dossena', 'role': 'Zaguero stopper y balones aéreos', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Edoardo Goldaniga', 'role': 'Zaguero de marca férrea al hombre', 'fit': 91, 'dribbled': 2.8, 'alert': '⚠️ Choques físicos en área grande', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Máximo Perrone', 'role': 'Pivote de corte y recuperación forzada', 'fit': 92, 'dribbled': 2.3, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -758,7 +758,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Ruslan Malinovskyi', 'role': 'Especialista en remates lejanos y tiros libres', 'xG': 0.42, 'fit': 91, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.60}
         ],
         'cards': [
-            {'name': 'Johan Vásquez', 'role': 'Central mexicano de marca al límite', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Reincidente en amonestaciones de corte', 'baseOdds': 2.30, 'prob': 71},
+            {'name': 'Johan Vásquez', 'role': 'Zaguero mexicano de marca al límite', 'fit': 94, 'dribbled': 2.7, 'alert': '⚡ Reincidente en amonestaciones de corte', 'baseOdds': 2.30, 'prob': 71},
             {'name': 'Mattia Bani', 'role': 'Capitán y stopper de choque aéreo', 'fit': 92, 'dribbled': 2.5, 'alert': '⚠️ Duelo físico intenso en área chica', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Morten Frendrup', 'role': 'Recuperador de corte táctico agresivo', 'fit': 95, 'dribbled': 3.2, 'alert': '⚠️ Infracciones reiteradas en mediocampo', 'baseOdds': 2.35, 'prob': 70}
         ]
@@ -774,7 +774,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Granit Xhaka', 'role': 'Líder medular y corte sistemático de contraataque', 'fit': 96, 'dribbled': 2.4, 'alert': '⚡ Reincidente en cortes de contraataque', 'baseOdds': 2.45, 'prob': 67},
-            {'name': 'Edmond Tapsoba', 'role': 'Central stopper y duelos mano a mano', 'fit': 92, 'dribbled': 1.9, 'alert': '⚠️ Duelo mano a mano en espacio abierto', 'baseOdds': 2.85, 'prob': 59},
+            {'name': 'Edmond Tapsoba', 'role': 'Zaguero stopper y duelos mano a mano', 'fit': 92, 'dribbled': 1.9, 'alert': '⚠️ Duelo mano a mano en espacio abierto', 'baseOdds': 2.85, 'prob': 59},
             {'name': 'Jeremie Frimpong', 'role': 'Carrilero veloz y repliegue forzado', 'fit': 84, 'dribbled': 3.2, 'alert': '⚠️ Faltas por repliegue apurado', 'baseOdds': 3.15, 'prob': 54}
         ]
     },
@@ -786,7 +786,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Jamal Musiala', 'role': 'Regates en área chica y definición', 'xG': 0.58, 'fit': 97, 'penalties': False, 'freeKicks': False, 'baseOdds': 2.60}
         ],
         'cards': [
-            {'name': 'Dayot Upamecano', 'role': 'Central stopper agresivo en anticipo', 'fit': 95, 'dribbled': 2.2, 'alert': '⚡ Cortes forzados de último recurso', 'baseOdds': 2.45, 'prob': 67},
+            {'name': 'Dayot Upamecano', 'role': 'Zaguero stopper agresivo en anticipo', 'fit': 95, 'dribbled': 2.2, 'alert': '⚡ Cortes forzados de último recurso', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Min-jae Kim', 'role': 'Monstruo defensivo de choque y duelos aéreos', 'fit': 96, 'dribbled': 1.8, 'alert': '⚠️ Duelo directo al límite en campo abierto', 'baseOdds': 2.70, 'prob': 60},
             {'name': 'Joshua Kimmich', 'role': 'Presión medular y corte de transiciones', 'fit': 94, 'dribbled': 2.3, 'alert': '⚠️ Infracciones en salida rival', 'baseOdds': 2.85, 'prob': 55}
         ]
@@ -800,7 +800,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Emre Can', 'role': 'Capitán y volante de choque rudo', 'fit': 93, 'dribbled': 2.8, 'alert': '⚡ Altísimo récord de amonestaciones tácticas', 'baseOdds': 2.25, 'prob': 73},
-            {'name': 'Nico Schlotterbeck', 'role': 'Central agresivo de anticipación y salida', 'fit': 95, 'dribbled': 2.3, 'alert': '⚠️ Cortes forzados en transiciones rivales', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Nico Schlotterbeck', 'role': 'Zaguero agresivo de anticipación y salida', 'fit': 95, 'dribbled': 2.3, 'alert': '⚠️ Cortes forzados en transiciones rivales', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Waldemar Anton', 'role': 'Stopper de marca férrea al hombre', 'fit': 94, 'dribbled': 2.0, 'alert': '⚠️ Fricción en balones divididos', 'baseOdds': 2.75, 'prob': 58}
         ]
     },
@@ -813,7 +813,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Willi Orbán', 'role': 'Capitán y zaguero de choque en área', 'fit': 95, 'dribbled': 2.2, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.45, 'prob': 67},
-            {'name': 'Castello Lukeba', 'role': 'Central veloz de anticipación y choque', 'fit': 93, 'dribbled': 2.4, 'alert': '⚠️ Faltas tácticas en campo abierto', 'baseOdds': 2.60, 'prob': 63},
+            {'name': 'Castello Lukeba', 'role': 'Zaguero veloz de anticipación y choque', 'fit': 93, 'dribbled': 2.4, 'alert': '⚠️ Faltas tácticas en campo abierto', 'baseOdds': 2.60, 'prob': 63},
             {'name': 'Amadou Haidara', 'role': 'Pivote de presión y corte de transiciones', 'fit': 92, 'dribbled': 2.7, 'alert': '⚠️ Reincidente en faltas de amonestación', 'baseOdds': 2.40, 'prob': 68}
         ]
     },
@@ -826,7 +826,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Robin Koch', 'role': 'Líder defensivo y choque en balones aéreos', 'fit': 95, 'dribbled': 2.4, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.40, 'prob': 68},
-            {'name': 'Tuta', 'role': 'Central agresivo en la anticipación', 'fit': 93, 'dribbled': 2.8, 'alert': '⚠️ Duelo físico intenso y tarjetas reiteradas', 'baseOdds': 2.35, 'prob': 70},
+            {'name': 'Tuta', 'role': 'Zaguero agresivo en la anticipación', 'fit': 93, 'dribbled': 2.8, 'alert': '⚠️ Duelo físico intenso y tarjetas reiteradas', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Ellyes Skhiri', 'role': 'Pivote defensivo y corte de transiciones', 'fit': 94, 'dribbled': 2.1, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.80, 'prob': 57}
         ]
     },
@@ -838,7 +838,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Enzo Millot', 'role': 'Especialista en Tiros Libres y Conducción', 'xG': 0.48, 'fit': 94, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.20}
         ],
         'cards': [
-            {'name': 'Jeff Chabot', 'role': 'Central físico dominante en balones divididos', 'fit': 95, 'dribbled': 2.7, 'alert': '⚡ Cortes contundentes en área propia', 'baseOdds': 2.30, 'prob': 71},
+            {'name': 'Jeff Chabot', 'role': 'Zaguero físico dominante en balones divididos', 'fit': 95, 'dribbled': 2.7, 'alert': '⚡ Cortes contundentes en área propia', 'baseOdds': 2.30, 'prob': 71},
             {'name': 'Atakan Karazor', 'role': 'Capitán y pivote de corte agresivo', 'fit': 94, 'dribbled': 2.9, 'alert': '⚠️ Frecuencia alta de faltas de contención', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Anthony Rouault', 'role': 'Stopper de marca al hombre', 'fit': 91, 'dribbled': 2.3, 'alert': '⚠️ Fricción en transiciones rápidas', 'baseOdds': 2.75, 'prob': 58}
         ]
@@ -868,7 +868,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         'cards': [
             {'name': 'Achraf Hakimi', 'role': 'Carrilero veloz de choque y roces en banda', 'fit': 95, 'dribbled': 3.0, 'alert': '⚠️ Duelo de alta velocidad y roces tácticos', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'Marquinhos', 'role': 'Capitán y líder de zaga central', 'fit': 96, 'dribbled': 1.6, 'alert': '⚡ Cortes forzados de último recurso', 'baseOdds': 2.90, 'prob': 54},
-            {'name': 'Willian Pacho', 'role': 'Central stopper dominante en el uno contra uno', 'fit': 94, 'dribbled': 2.4, 'alert': '⚠️ Faltas tácticas en campo abierto', 'baseOdds': 2.60, 'prob': 63}
+            {'name': 'Willian Pacho', 'role': 'Zaguero stopper dominante en el uno contra uno', 'fit': 94, 'dribbled': 2.4, 'alert': '⚠️ Faltas tácticas en campo abierto', 'baseOdds': 2.60, 'prob': 63}
         ]
     },
     'marseille': {
@@ -879,9 +879,9 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Amine Harit', 'role': 'Llegador de segunda línea y creación', 'xG': 0.44, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.50}
         ],
         'cards': [
-            {'name': 'Leonardo Balerdi', 'role': 'Central temperamental y entradas al límite', 'fit': 93, 'dribbled': 2.8, 'alert': '⚡ Altísimo historial de tarjetas rojas y amarillas', 'baseOdds': 2.15, 'prob': 76},
+            {'name': 'Leonardo Balerdi', 'role': 'Zaguero temperamental y entradas al límite', 'fit': 93, 'dribbled': 2.8, 'alert': '⚡ Altísimo historial de tarjetas rojas y amarillas', 'baseOdds': 2.15, 'prob': 76},
             {'name': 'Pierre-Emile Højbjerg', 'role': 'Líder del mediocampo y corte de transiciones', 'fit': 95, 'dribbled': 2.6, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.45, 'prob': 67},
-            {'name': 'Derek Cornelius', 'role': 'Central de choque y juego aéreo', 'fit': 91, 'dribbled': 2.3, 'alert': '⚠️ Choques físicos en área propia', 'baseOdds': 2.70, 'prob': 60}
+            {'name': 'Derek Cornelius', 'role': 'Zaguero de choque y juego aéreo', 'fit': 91, 'dribbled': 2.3, 'alert': '⚠️ Choques físicos en área propia', 'baseOdds': 2.70, 'prob': 60}
         ]
     },
     'asmonaco': {
@@ -894,7 +894,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         'cards': [
             {'name': 'Thilo Kehrer', 'role': 'Líder defensivo y cortes al hombre', 'fit': 94, 'dribbled': 2.5, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Denis Zakaria', 'role': 'Pivote de choque y recuperación agresiva', 'fit': 95, 'dribbled': 2.9, 'alert': '⚠️ Reincidente en faltas de amonestación', 'baseOdds': 2.30, 'prob': 72},
-            {'name': 'Wilfried Singo', 'role': 'Central de enorme potencia y duelos físicos', 'fit': 93, 'dribbled': 2.2, 'alert': '⚠️ Fricción en córners rivales', 'baseOdds': 2.65, 'prob': 61}
+            {'name': 'Wilfried Singo', 'role': 'Zaguero de enorme potencia y duelos físicos', 'fit': 93, 'dribbled': 2.2, 'alert': '⚠️ Fricción en córners rivales', 'baseOdds': 2.65, 'prob': 61}
         ]
     },
 
@@ -908,20 +908,20 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Morten Hjulmand', 'role': 'Capitán y pivote de corte táctico agresivo', 'fit': 96, 'dribbled': 2.8, 'alert': '⚡ Reincidente en amonestaciones de zona', 'baseOdds': 2.25, 'prob': 73},
-            {'name': 'Gonçalo Inácio', 'role': 'Central stopper y duelos directos', 'fit': 94, 'dribbled': 1.9, 'alert': '⚠️ Cortes forzados de último recurso', 'baseOdds': 2.65, 'prob': 61},
+            {'name': 'Gonçalo Inácio', 'role': 'Zaguero stopper y duelos directos', 'fit': 94, 'dribbled': 1.9, 'alert': '⚠️ Cortes forzados de último recurso', 'baseOdds': 2.65, 'prob': 61},
             {'name': 'Ousmane Diomande', 'role': 'Zaguero de choque físico en área chica', 'fit': 95, 'dribbled': 2.3, 'alert': '⚠️ Fricción en balones aéreos divididos', 'baseOdds': 2.60, 'prob': 63}
         ]
     },
     'benfica': {
         'club': 'Benfica',
         'scorers': [
-            {'name': 'Vangelis Pavlidis', 'role': 'Pateador N°1: Penales y Artillero Central', 'xG': 0.78, 'fit': 97, 'penalties': True, 'freeKicks': False, 'baseOdds': 2.15},
+            {'name': 'Vangelis Pavlidis', 'role': 'Pateador N°1: Penales y Artillero Zaguero', 'xG': 0.78, 'fit': 97, 'penalties': True, 'freeKicks': False, 'baseOdds': 2.15},
             {'name': 'Kerem Aktürkoğlu', 'role': 'Pateador N°2 (Hereda Penales)', 'xG': 0.62, 'fit': 96, 'penalties': False, 'freeKicks': True, 'baseOdds': 2.55},
             {'name': 'Ángel Di María', 'role': 'Especialista en Balón Parado directo y Penales', 'xG': 0.54, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 2.85}
         ],
         'cards': [
             {'name': 'Nicolás Otamendi', 'role': 'Capitán temperamental de choque continuo', 'fit': 93, 'dribbled': 2.7, 'alert': '⚡ Altísimo récord de amonestaciones y roces', 'baseOdds': 2.20, 'prob': 74},
-            {'name': 'António Silva', 'role': 'Central stopper de anticipo agresivo', 'fit': 94, 'dribbled': 2.2, 'alert': '⚠️ Cortes forzados en transiciones rivales', 'baseOdds': 2.55, 'prob': 64},
+            {'name': 'António Silva', 'role': 'Zaguero stopper de anticipo agresivo', 'fit': 94, 'dribbled': 2.2, 'alert': '⚠️ Cortes forzados en transiciones rivales', 'baseOdds': 2.55, 'prob': 64},
             {'name': 'Florentino Luís', 'role': 'Pivote defensivo de corte frontal sistemático', 'fit': 95, 'dribbled': 2.9, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.45, 'prob': 67}
         ]
     },
@@ -934,7 +934,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Alan Varela', 'role': 'Pivote de corte duro y marcaje al hombre', 'fit': 95, 'dribbled': 2.8, 'alert': '⚡ Reincidente en faltas de advertencia táctica', 'baseOdds': 2.30, 'prob': 71},
-            {'name': 'Nehuén Pérez', 'role': 'Central argentino de marca agresiva', 'fit': 94, 'dribbled': 2.5, 'alert': '⚠️ Fricción constante en balones divididos', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Nehuén Pérez', 'role': 'Zaguero argentino de marca agresiva', 'fit': 94, 'dribbled': 2.5, 'alert': '⚠️ Fricción constante en balones divididos', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Nico González', 'role': 'Presión y recuperación en zona 14', 'fit': 93, 'dribbled': 2.6, 'alert': '⚠️ Faltas tácticas en salida rival', 'baseOdds': 2.65, 'prob': 62}
         ]
     },
@@ -949,7 +949,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
         ],
         'cards': [
             {'name': 'Alistair Johnston', 'role': 'Lateral derecho de marca dura y repliegue', 'fit': 82, 'dribbled': 3.4, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.50, 'prob': 66},
-            {'name': 'Cameron Carter-Vickers', 'role': 'Central stopper dominante en cuerpo a cuerpo', 'fit': 94, 'dribbled': 1.8, 'alert': '⚡ Duelo aéreo y cuerpo a cuerpo al límite', 'baseOdds': 2.80, 'prob': 58},
+            {'name': 'Cameron Carter-Vickers', 'role': 'Zaguero stopper dominante en cuerpo a cuerpo', 'fit': 94, 'dribbled': 1.8, 'alert': '⚡ Duelo aéreo y cuerpo a cuerpo al límite', 'baseOdds': 2.80, 'prob': 58},
             {'name': 'Greg Taylor', 'role': 'Marcaje exterior y cortes de contraataque', 'fit': 85, 'dribbled': 2.7, 'alert': '⚠️ Faltas tácticas en carril exterior', 'baseOdds': 2.95, 'prob': 54}
         ]
     },
@@ -961,7 +961,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Nedim Bajrami', 'role': 'Balón parado y media distancia', 'xG': 0.44, 'fit': 93, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.40}
         ],
         'cards': [
-            {'name': 'Robin Pröpper', 'role': 'Central stopper agresivo en el anticipo', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Choques constantes en área grande', 'baseOdds': 2.35, 'prob': 70},
+            {'name': 'Robin Pröpper', 'role': 'Zaguero stopper agresivo en el anticipo', 'fit': 93, 'dribbled': 2.6, 'alert': '⚡ Choques constantes en área grande', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Connor Barron', 'role': 'Pivote de corte y entradas contundentes', 'fit': 92, 'dribbled': 2.9, 'alert': '⚠️ Faltas tácticas en el círculo central', 'baseOdds': 2.45, 'prob': 67},
             {'name': 'John Souttar', 'role': 'Zaguero de gran porte y juego aéreo duro', 'fit': 94, 'dribbled': 2.1, 'alert': '⚠️ Fricción en balones divididos y córners', 'baseOdds': 2.70, 'prob': 59}
         ]
@@ -974,7 +974,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Topi Keskinen', 'role': 'Desborde veloz y diagonales', 'xG': 0.45, 'fit': 95, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.30}
         ],
         'cards': [
-            {'name': 'Slobodan Rubežić', 'role': 'Central ultra físico y entradas al límite', 'fit': 94, 'dribbled': 3.1, 'alert': '⚡ Altísimo índice de amonestaciones en duelos aéreos', 'baseOdds': 2.20, 'prob': 75},
+            {'name': 'Slobodan Rubežić', 'role': 'Zaguero ultra físico y entradas al límite', 'fit': 94, 'dribbled': 3.1, 'alert': '⚡ Altísimo índice de amonestaciones en duelos aéreos', 'baseOdds': 2.20, 'prob': 75},
             {'name': 'Graeme Shinnie', 'role': 'Capitán y pivote de corte agresivo', 'fit': 93, 'dribbled': 3.0, 'alert': '⚠️ Reincidente en faltas tácticas de amonestación', 'baseOdds': 2.25, 'prob': 73},
             {'name': 'Jack MacKenzie', 'role': 'Marcaje en banda y corte de carrera', 'fit': 86, 'dribbled': 3.3, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.60, 'prob': 63}
         ]
@@ -984,13 +984,13 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
     'bodoglimt': {
         'club': 'Bodø/Glimt',
         'scorers': [
-            {'name': 'Kasper Høgh', 'role': 'Pateador N°1: Penales y Remate Central', 'xG': 0.76, 'fit': 97, 'penalties': True, 'freeKicks': False, 'baseOdds': 2.20},
+            {'name': 'Kasper Høgh', 'role': 'Pateador N°1: Penales y Remate Zaguero', 'xG': 0.76, 'fit': 97, 'penalties': True, 'freeKicks': False, 'baseOdds': 2.20},
             {'name': 'Jens Petter Hauge', 'role': 'Pateador N°2 (Hereda Penales + Tiros Libres)', 'xG': 0.64, 'fit': 96, 'penalties': False, 'freeKicks': True, 'baseOdds': 2.55},
             {'name': 'Philip Zinckernagel', 'role': 'Desborde y remate desde la frontal', 'xG': 0.50, 'fit': 94, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.00}
         ],
         'cards': [
             {'name': 'Patrick Berg', 'role': 'Capitán y pivote de equilibrio defensivo', 'fit': 96, 'dribbled': 2.4, 'alert': '⚡ Faltas tácticas en zona de transición', 'baseOdds': 2.55, 'prob': 64},
-            {'name': 'Jostein Gundersen', 'role': 'Central stopper y balones aéreos divididos', 'fit': 94, 'dribbled': 2.2, 'alert': '⚠️ Choques físicos en área propia', 'baseOdds': 2.65, 'prob': 62},
+            {'name': 'Jostein Gundersen', 'role': 'Zaguero stopper y balones aéreos divididos', 'fit': 94, 'dribbled': 2.2, 'alert': '⚠️ Choques físicos en área propia', 'baseOdds': 2.65, 'prob': 62},
             {'name': 'Odin Bjørtuft', 'role': 'Zaguero de intercepción en campo abierto', 'fit': 92, 'dribbled': 2.5, 'alert': '⚠️ Fricción en contraataques rivales', 'baseOdds': 2.75, 'prob': 58}
         ]
     },
@@ -1002,7 +1002,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Niklas Castro', 'role': 'Chileno-noruego de gran remate y balón parado', 'xG': 0.48, 'fit': 95, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.10}
         ],
         'cards': [
-            {'name': 'Fredrik Pallesen Knudsen', 'role': 'Central de choque y juego físico dominante', 'fit': 94, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.35, 'prob': 70},
+            {'name': 'Fredrik Pallesen Knudsen', 'role': 'Zaguero de choque y juego físico dominante', 'fit': 94, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.35, 'prob': 70},
             {'name': 'Japhet Sery Larsen', 'role': 'Stopper agresivo en el anticipo', 'fit': 93, 'dribbled': 2.4, 'alert': '⚠️ Duelo físico intenso y roces constantes', 'baseOdds': 2.50, 'prob': 65},
             {'name': 'Emil Kornvig', 'role': 'Recuperador de corte táctico', 'fit': 92, 'dribbled': 2.7, 'alert': '⚠️ Infracciones en salida rival', 'baseOdds': 2.70, 'prob': 60}
         ]
@@ -1015,7 +1015,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Magnus Wolff Eikrem', 'role': 'Capitán y maestro en tiros libres directos', 'xG': 0.45, 'fit': 92, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.40}
         ],
         'cards': [
-            {'name': 'Casper Øyvann', 'role': 'Central stopper y duelos directos', 'fit': 93, 'dribbled': 2.5, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.40, 'prob': 68},
+            {'name': 'Casper Øyvann', 'role': 'Zaguero stopper y duelos directos', 'fit': 93, 'dribbled': 2.5, 'alert': '⚡ Cortes forzados de contraataque', 'baseOdds': 2.40, 'prob': 68},
             {'name': 'Eirik Haugan', 'role': 'Zaguero de choque y balones divididos', 'fit': 92, 'dribbled': 2.7, 'alert': '⚠️ Fricción en balones aéreos y córners', 'baseOdds': 2.50, 'prob': 65},
             {'name': 'Mats Møller Dæhli', 'role': 'Presión y corte en transiciones', 'fit': 91, 'dribbled': 2.2, 'alert': '⚠️ Faltas tácticas en zona medular', 'baseOdds': 2.80, 'prob': 57}
         ]
@@ -1028,7 +1028,7 @@ ROSTERS: Dict[str, Dict[str, Any]] = {
             {'name': 'Peter Christiansen', 'role': 'Desborde y remate exterior', 'xG': 0.45, 'fit': 94, 'penalties': False, 'freeKicks': False, 'baseOdds': 3.30}
         ],
         'cards': [
-            {'name': 'Gianni Stensness', 'role': 'Central stopper de choque y juego aéreo duro', 'fit': 94, 'dribbled': 2.8, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.35, 'prob': 71},
+            {'name': 'Gianni Stensness', 'role': 'Zaguero stopper de choque y juego aéreo duro', 'fit': 94, 'dribbled': 2.8, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.35, 'prob': 71},
             {'name': 'Sondre Langås', 'role': 'Zaguero agresivo en el anticipo', 'fit': 93, 'dribbled': 2.4, 'alert': '⚠️ Fricción en balones divididos', 'baseOdds': 2.55, 'prob': 64},
             {'name': 'Joe Bell', 'role': 'Pivote defensivo y faltas tácticas de corte', 'fit': 95, 'dribbled': 2.9, 'alert': '⚠️ Reincidente en amonestaciones de zona', 'baseOdds': 2.45, 'prob': 67}
         ]
@@ -1047,7 +1047,7 @@ LEAGUE_REAL_PLAYERS_POOL = [
     {'name': 'Darío Osorio', 'role': 'Potencia Exterior y Disparo a Puerta', 'xG': 0.50, 'fit': 96, 'penalties': False, 'freeKicks': True, 'baseOdds': 3.00},
     {'name': 'Víctor Dávila', 'role': 'Definición de Segunda Jugada', 'xG': 0.54, 'fit': 95, 'penalties': False, 'freeKicks': False, 'baseOdds': 2.85},
     # Defensas y tarjetas reales
-    {'name': 'Paulo Díaz', 'role': 'Central Stopper y Anticipación Contundente', 'fit': 95, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.35, 'prob': 71},
+    {'name': 'Paulo Díaz', 'role': 'Zaguero Stopper y Anticipación Contundente', 'fit': 95, 'dribbled': 2.6, 'alert': '⚡ Cortes forzados de última línea', 'baseOdds': 2.35, 'prob': 71},
     {'name': 'Gabriel Suazo', 'role': 'Marcaje Férreo y Repliegue Forzado', 'fit': 93, 'dribbled': 3.2, 'alert': '⚠️ Duelo Desigual por Velocidad en Banda', 'baseOdds': 2.45, 'prob': 67},
     {'name': 'Matías Catalán', 'role': 'Zaguero de Choque y Duelos Aéreos', 'fit': 94, 'dribbled': 2.4, 'alert': '⚡ Duelo intenso en juego aéreo', 'baseOdds': 2.40, 'prob': 69},
     {'name': 'Guillermo Soto', 'role': 'Frenado de Desbordes y Roce Físico', 'fit': 85, 'dribbled': 3.4, 'alert': '⚠️ Repliegue forzado y faltas en banda', 'baseOdds': 2.60, 'prob': 63},

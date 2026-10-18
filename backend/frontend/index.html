@@ -62,17 +62,68 @@
 
     const { useState, useMemo, useEffect, useRef } = React;
 
-    const WEEK_DAYS = [
-      { id: 'all_week', short: '📅 TODA LA SEMANA' },
-      { id: 'live', short: '🔴 EN VIVO' },
-      { id: 'vie', short: 'VIERNES' },
-      { id: 'sab', short: 'SÁBADO' },
-      { id: 'dom', short: 'DOMINGO' },
-      { id: 'lun', short: 'LUNES' },
-      { id: 'mar', short: 'MARTES' },
-      { id: 'mie', short: 'MIÉRCOLES' },
-      { id: 'jue', short: 'JUEVES' }
-    ];
+    // Helper para zona horaria America/Santiago y cálculo estricto de la semana/jornada en curso
+    const getSantiagoDate = () => {
+      try {
+        const santiagoStr = new Date().toLocaleString("en-US", { timeZone: "America/Santiago" });
+        return new Date(santiagoStr);
+      } catch(e) {
+        const d = new Date();
+        return new Date(d.getTime() - (3 * 3600000));
+      }
+    };
+
+    const getSantiagoYMD = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const getActiveJornadaRange = () => {
+      const santiagoNow = getSantiagoDate();
+      const dayOfWeek = santiagoNow.getDay(); // 0=Dom, 1=Lun, ..., 5=Vie, 6=Sab
+      const daysSinceFriday = (dayOfWeek - 5 + 7) % 7;
+      
+      const startDate = new Date(santiagoNow.getFullYear(), santiagoNow.getMonth(), santiagoNow.getDate() - daysSinceFriday);
+      const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6);
+      
+      const startIso = getSantiagoYMD(startDate);
+      const endIso = getSantiagoYMD(endDate);
+
+      const dayDateMap = {
+        'vie': getSantiagoYMD(startDate),
+        'sab': getSantiagoYMD(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 1)),
+        'dom': getSantiagoYMD(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 2)),
+        'lun': getSantiagoYMD(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 3)),
+        'mar': getSantiagoYMD(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 4)),
+        'mie': getSantiagoYMD(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 5)),
+        'jue': getSantiagoYMD(new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6))
+      };
+
+      return { startIso, endIso, dayDateMap, santiagoNow };
+    };
+
+    const buildWeekDaysList = () => {
+      const { dayDateMap } = getActiveJornadaRange();
+      const getNum = (id) => {
+        const iso = dayDateMap[id];
+        return iso ? ` ${iso.slice(8, 10)}` : '';
+      };
+      return [
+        { id: 'all_week', short: '📅 TODA LA SEMANA' },
+        { id: 'live', short: '🔴 EN VIVO' },
+        { id: 'vie', short: `VIERNES${getNum('vie')}` },
+        { id: 'sab', short: `SÁBADO${getNum('sab')}` },
+        { id: 'dom', short: `DOMINGO${getNum('dom')}` },
+        { id: 'lun', short: `LUNES${getNum('lun')}` },
+        { id: 'mar', short: `MARTES${getNum('mar')}` },
+        { id: 'mie', short: `MIÉRCOLES${getNum('mie')}` },
+        { id: 'jue', short: `JUEVES${getNum('jue')}` }
+      ];
+    };
+
+    const WEEK_DAYS = buildWeekDaysList();
 
     // Ligas individuales empezando por Chile
     const LEAGUES_LIST = [
@@ -127,6 +178,8 @@
       const [onlyStarred, setOnlyStarred] = useState(false);
       const [onlyLive, setOnlyLive] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
+
+      const weekDays = useMemo(() => buildWeekDaysList(), [matches]);
 
       // Equipos Favoritos / VIP seleccionados manualmente por el usuario (Persistidos en localStorage)
       const [vipTeams, setVipTeams] = useState(loadSavedFavorites);
@@ -349,7 +402,17 @@
         setSelectedLeague(leagueId);
         setOnlyStarred(false);
         if (leagueId !== 'all') {
-          const hasMatches = matches.some(m => m.leagueId === leagueId && (selectedDay === 'all_week' || m.dayId === selectedDay));
+          const { startIso, endIso, dayDateMap } = getActiveJornadaRange();
+          const hasMatches = matches.some(m => {
+            if (m.leagueId !== leagueId) return false;
+            const mDate = m.matchDate || (m.rawDate ? m.rawDate.slice(0, 10) : '');
+            if (mDate && (mDate < startIso || mDate > endIso)) return false;
+            if (selectedDay === 'all_week') return true;
+            if (selectedDay === 'live') return m.isLive;
+            const expectedDate = dayDateMap[selectedDay];
+            if (expectedDate && mDate && mDate !== expectedDate) return false;
+            return m.dayId === selectedDay;
+          });
           if (!hasMatches) {
             setSelectedDay('all_week');
           }
@@ -383,12 +446,26 @@
         return matches.filter(m => isMatchFavorite(m)).length;
       }, [matches, vipTeams]);
 
-      // Filtrado reactivo de partidos
+      // Filtrado reactivo de partidos con filtro estricto de semana/jornada en America/Santiago
       const filteredMatches = useMemo(() => {
+        const { startIso, endIso, dayDateMap } = getActiveJornadaRange();
+
         return matches.filter((m) => {
+          // 1. FILTRO ESTRICTO: Descartar automáticamente partidos de semanas posteriores o fuera de la jornada
+          const mDate = m.matchDate || (m.rawDate ? m.rawDate.slice(0, 10) : '');
+          if (mDate && (mDate < startIso || mDate > endIso)) {
+            return false;
+          }
+
           if (onlyLive && !m.isLive) return false;
           if (selectedDay === 'live' && !m.isLive) return false;
-          if (selectedDay !== 'all_week' && selectedDay !== 'live' && m.dayId !== selectedDay) return false;
+          
+          // 2. Filtro por día: verificar coincidencia exacta por dayId Y por fecha de la jornada
+          if (selectedDay !== 'all_week' && selectedDay !== 'live') {
+            const expectedDate = dayDateMap[selectedDay];
+            if (expectedDate && mDate && mDate !== expectedDate) return false;
+            if (m.dayId !== selectedDay) return false;
+          }
           
           if (onlyStarred && !isMatchFavorite(m)) return false;
           if (!onlyStarred && selectedLeague !== 'all' && m.leagueId !== selectedLeague) return false;
@@ -623,7 +700,7 @@
 
             {/* BARRA CALENDARIO SEMANAL */}
             <div className="max-w-[1750px] mx-auto mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-1">
-              {WEEK_DAYS.map((d) => {
+              {weekDays.map((d) => {
                 const isActive = selectedDay === d.id;
                 return (
                   <button

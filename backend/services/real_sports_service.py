@@ -96,17 +96,46 @@ DAY_TO_DAY_ID = {
     0: "lun", 1: "mar", 2: "mie", 3: "jue", 4: "vie", 5: "sab", 6: "dom"
 }
 
+def get_santiago_tz():
+    try:
+        import zoneinfo
+        return zoneinfo.ZoneInfo("America/Santiago")
+    except Exception:
+        return datetime.timezone(datetime.timedelta(hours=-3))
+
+def get_santiago_now() -> datetime.datetime:
+    return datetime.datetime.now(get_santiago_tz())
+
+def get_current_jornada_range(now_santiago: datetime.datetime) -> tuple[datetime.date, datetime.date, List[str]]:
+    """
+    Calcula el rango estricto de fechas para la semana / jornada en curso en America/Santiago.
+    El ciclo futbolístico semanal (jornada) abarca 7 días consecutivos desde el viernes
+    de la fecha activa hasta el jueves subsiguiente.
+    Cualquier partido fuera de este rango es automáticamente descartado.
+    """
+    today = now_santiago.date()
+    days_since_friday = (today.weekday() - 4) % 7
+    start_date = today - datetime.timedelta(days=days_since_friday)
+    end_date = start_date + datetime.timedelta(days=6)
+    days_str_list = [(start_date + datetime.timedelta(days=i)).strftime("%Y%m%d") for i in range(7)]
+    return start_date, end_date, days_str_list
+
 class RealSportsService:
     _cached_matches = None
     _last_fetch = None
     _cached_teams = None
 
     @classmethod
-    def format_date_spanish(cls, iso_str: str) -> tuple[str, str, str]:
-        """Convierte '2026-10-17T11:30Z' a ('Sáb 17 Oct, 08:30 hrs', 'sab', 'Sábado')"""
+    def format_date_spanish(cls, iso_str: str) -> tuple[str, str, str, str, Any]:
+        """
+        Convierte '2026-10-17T11:30Z' a:
+        ('Sáb 17 Oct, 08:30 hrs', 'sab', 'Sábado', '2026-10-17', date_obj)
+        utilizando estrictamente la zona horaria America/Santiago.
+        """
         try:
-            dt = datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-            dt_local = dt - datetime.timedelta(hours=3)
+            tz = get_santiago_tz()
+            dt_utc = datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+            dt_local = dt_utc.astimezone(tz)
             
             day_name = SPANISH_DAYS[dt_local.weekday()]
             month_name = SPANISH_MONTHS[dt_local.month]
@@ -116,9 +145,10 @@ class RealSportsService:
             formatted_label = f"{day_name} {day_num} {month_name}, {time_str} hrs"
             day_id = DAY_TO_DAY_ID[dt_local.weekday()]
             full_day = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][dt_local.weekday()]
-            return formatted_label, day_id, full_day
+            date_iso = dt_local.strftime("%Y-%m-%d")
+            return formatted_label, day_id, full_day, date_iso, dt_local.date()
         except Exception:
-            return "Fecha por confirmar", "all_week", "Semana"
+            return "Fecha por confirmar", "all_week", "Semana", "", None
 
     @classmethod
     def get_all_teams_by_league(cls) -> Dict[str, Any]:
@@ -179,16 +209,13 @@ class RealSportsService:
         Realiza un barrido exhaustivo en paralelo de toda la semana para las 9 ligas oficiales.
         Asigna árbitros oficiales reales y únicos y cuotas dinámicas actualizadas de Betano.
         """
-        now = datetime.datetime.now()
+        now_santiago = get_santiago_now()
         if not force_refresh and cls._cached_matches and cls._last_fetch:
-            if (now - cls._last_fetch).total_seconds() < 240:
+            if (now_santiago - cls._last_fetch).total_seconds() < 240:
                 return cls._cached_matches
 
-        base_date = now.date()
-        days_to_check = []
-        for offset in range(-2, 10):
-            d = base_date + datetime.timedelta(days=offset)
-            days_to_check.append(d.strftime("%Y%m%d"))
+        # Obtener rango estricto de la semana/jornada en curso en America/Santiago (Viernes a Jueves)
+        week_start_date, week_end_date, days_to_check = get_current_jornada_range(now_santiago)
 
         tasks = []
         with ThreadPoolExecutor(max_workers=14) as executor:
@@ -225,7 +252,13 @@ class RealSportsService:
             away_name = away_comp.get("team", {}).get("displayName", "Visitante")
 
             raw_date = ev.get("date", "")
-            d_slug = raw_date[:10].replace("-", "") if raw_date else "20261017"
+            date_label, day_id, full_day, match_date_str, match_date_obj = cls.format_date_spanish(raw_date)
+
+            # FILTRO ESTRICTO: Descartar automáticamente partidos de semanas posteriores o fuera de la jornada
+            if match_date_obj is None or match_date_obj < week_start_date or match_date_obj > week_end_date:
+                continue
+
+            d_slug = match_date_obj.strftime("%Y%m%d")
             h_slug = re.sub(r'[^a-zA-Z0-9]+', '', home_name.lower())[:12]
             a_slug = re.sub(r'[^a-zA-Z0-9]+', '', away_name.lower())[:12]
 
@@ -239,8 +272,6 @@ class RealSportsService:
             status_type = ev.get("status", {}).get("type", {})
             state = status_type.get("state", "pre")
             is_live = (state == "in")
-
-            date_label, day_id, full_day = cls.format_date_spanish(raw_date)
 
             home_score = home_comp.get("score", "0")
             away_score = away_comp.get("score", "0")
@@ -327,6 +358,10 @@ class RealSportsService:
                 "dayLabel": date_label,
                 "fullDay": full_day,
                 "rawDate": raw_date,
+                "matchDate": match_date_str,
+                "weekStartDate": week_start_date.strftime("%Y-%m-%d"),
+                "weekEndDate": week_end_date.strftime("%Y-%m-%d"),
+                "isCurrentWeek": True,
                 "dataPhase": phase,
                 "leagueId": l_key,
                 "leagueName": f"{cfg['flag']} {cfg['name']}",
@@ -483,5 +518,5 @@ class RealSportsService:
         processed_matches.sort(key=lambda x: (x.get("rawDate", ""), x.get("leagueId", ""), x.get("id", "")))
 
         cls._cached_matches = processed_matches
-        cls._last_fetch = now
+        cls._last_fetch = now_santiago
         return processed_matches
