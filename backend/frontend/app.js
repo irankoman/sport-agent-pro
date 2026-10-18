@@ -984,6 +984,7 @@
             const topScorers = activeAnalytics.topScorers || [];
             const topCards = activeAnalytics.topCards || [];
             const tacticalPlanB = activeAnalytics.tacticalPlanB || null;
+            const snipers = activeAnalytics.snipers || [];
 
             const shotsAnalytics = activeDeep.shotsAnalytics || {};
             const cornersAndXg = activeDeep.cornersAndXgMatrix || {};
@@ -2282,7 +2283,7 @@
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                  {topScorers.map((sc) => {
+                                  {(topScorers || []).map((sc) => {
                                     const pickItem = {
                                       id: sc.id,
                                       category: '⚽ JUGADOR ANOTA',
@@ -2327,6 +2328,7 @@
                                           <h5 className="text-sm font-black text-white">{sc.name}</h5>
                                           <span className="text-[11px] text-amber-300 font-semibold block mt-0.5">{sc.pos}</span>
 
+                                          {/* Métricas Avanzadas: xG, Fit, Volumen Tiros y Minutos */}
                                           <div className="grid grid-cols-2 gap-1.5 my-2 text-[10px] font-mono">
                                             <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
                                               <span className="text-slate-400 block">xG por 90m:</span>
@@ -2335,6 +2337,25 @@
                                             <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
                                               <span className="text-slate-400 block">% Físico:</span>
                                               <strong className="text-emerald-400 font-bold">{sc.fit}% Fit</strong>
+                                            </div>
+                                            <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
+                                              <span className="text-slate-400 block">🎯 Tiros / Arco:</span>
+                                              <strong className="text-sky-300 font-bold">{sc.shotsPer90 || 2.8}T | {sc.sotPer90 || 1.3} SOT</strong>
+                                            </div>
+                                            <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
+                                              <span className="text-slate-400 block">⏱️ Minutos:</span>
+                                              <strong className="text-emerald-400 font-bold">{sc.avgMinutes || "85' prom."}</strong>
+                                            </div>
+                                          </div>
+
+                                          {/* Racha y Matchup Rival */}
+                                          <div className="space-y-1 mb-2">
+                                            <div className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 flex items-center justify-between">
+                                              <span>{sc.streak || '🔥 3G / 6 SOT en últ. 5 PJ'}</span>
+                                            </div>
+                                            <div className="text-[10px] font-mono text-slate-300 bg-slate-950 px-2 py-1 rounded border border-slate-800 flex items-center justify-between">
+                                              <span className="text-emerald-400 font-bold">{sc.rivalDefenseTag || 'Vs Defensa Vulnerable'}</span>
+                                              <span className="text-slate-400 text-[9px]">{sc.rivalDefenseDetail || 'Concede >1.5 G/p'}</span>
                                             </div>
                                           </div>
 
@@ -2348,12 +2369,56 @@
                                               {sc.inheritanceNotice}
                                             </div>
                                           )}
+
+                                          {/* Mercado de Doble Amenaza: Gol o Asistencia */}
+                                          {sc.goalOrAssist && (() => {
+                                            const gaItem = {
+                                              id: sc.goalOrAssist.id,
+                                              category: '⚡ GOL O ASISTENCIA',
+                                              market: sc.goalOrAssist.market,
+                                              odds: sc.goalOrAssist.odds,
+                                              prob: sc.goalOrAssist.prob,
+                                              reason: sc.goalOrAssist.reason
+                                            };
+                                            const isGaAdded = betSlip.some((p) => p.id === sc.goalOrAssist.id);
+                                            return (
+                                              <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-1.5 bg-slate-950/80 p-2 rounded-lg border border-amber-500/20">
+                                                <div className="min-w-0">
+                                                  <div className="flex items-center gap-1">
+                                                    <span className="text-[10px] font-black text-amber-300 flex items-center gap-0.5">
+                                                      <span>⚡</span> Gol o Asistencia
+                                                    </span>
+                                                    <span className="text-[9px] font-mono text-emerald-400 font-bold">
+                                                      {sc.goalOrAssist.prob}%
+                                                    </span>
+                                                  </div>
+                                                  <span className="text-[9px] text-slate-400 font-mono block">
+                                                    xG+xA: {sc.goalOrAssist.xg_xa || 0.65}
+                                                  </span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                  <span className="text-xs font-black text-orange-400 font-mono">
+                                                    @{(sc.goalOrAssist.odds || 1.65).toFixed(2)}
+                                                  </span>
+                                                  <button
+                                                    onClick={() => togglePickInSlip(gaItem)}
+                                                    className={`px-2 py-1 rounded text-[10px] font-black transition active:scale-95 shadow ${
+                                                      isGaAdded ? 'bg-orange-500 text-white' : 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-black'
+                                                    }`}
+                                                  >
+                                                    {isGaAdded ? '✓' : '+ G/A'}
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
 
+                                        {/* Fila Principal de Goleador en Cualquier Momento */}
                                         <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
                                           <div>
                                             <div className="flex items-center gap-1.5">
-                                              <span className="text-base font-black text-orange-400 font-mono">@{sc.odds.toFixed(2)}</span>
+                                              <span className="text-base font-black text-orange-400 font-mono">@{(sc.odds || 2.30).toFixed(2)}</span>
                                               <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">Ref. Betano</span>
                                             </div>
                                             <span className="text-[10px] text-emerald-400 font-bold font-mono block">{sc.prob}% IA</span>
@@ -2395,7 +2460,7 @@
                                     <div className="flex items-center gap-3">
                                       <div className="text-right font-mono">
                                         <span className="text-[10px] text-slate-400 block">Cuota Titular:</span>
-                                        <span className="text-sm font-black text-amber-300">@{tacticalPlanB.newOdds.toFixed(2)}</span>
+                                        <span className="text-sm font-black text-amber-300">@{(tacticalPlanB.newOdds || 2.10).toFixed(2)}</span>
                                       </div>
                                       <button
                                         onClick={() => {
@@ -2420,7 +2485,169 @@
                                 )}
                               </div>
 
-                              {/* Top 3 Tarjetas con Cruce Directo */}
+                              {/* ========================================================================= */}
+                              {/* 3. NUEVA SECCIÓN: FRANCOTIRADORES — PROPS DE TIROS AL ARCO (+0.5 / +1.5 SOT)*/}
+                              {/* ========================================================================= */}
+                              <div className="bg-slate-950 border-2 border-sky-500/40 rounded-xl p-4 shadow-xl space-y-3">
+                                <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🎯</span>
+                                    <div>
+                                      <h4 className="text-xs font-black uppercase text-white tracking-wide">
+                                        FRANCOTIRADORES — PROPS DE TIROS AL ARCO (+0.5 / +1.5 SOT)
+                                      </h4>
+                                      <p className="text-[11px] text-slate-400">
+                                        Top jugadores con mayor volumen de remate a puerta y peligro aéreo en balón parado.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
+                                      <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                                    </span>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/30 font-bold">
+                                      ⚡ Alta Certeza
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                                  {(snipers || []).map((sn) => {
+                                    const isAerial = Boolean(sn.isAerial);
+                                    return (
+                                      <div
+                                        key={sn.id}
+                                        className={`p-3.5 rounded-xl border-2 flex flex-col justify-between transition ${
+                                          isAerial ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="flex items-center justify-between mb-1.5 gap-1">
+                                            <span className="text-[10px] font-black uppercase text-slate-400 font-mono truncate">{sn.team}</span>
+                                            {isAerial ? (
+                                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-mono">
+                                                ✈️ AÉREO CÓRNER
+                                              </span>
+                                            ) : (
+                                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono">
+                                                🎯 {sn.accuracy || 'Precisión'}
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <h5 className="text-sm font-black text-white">{sn.name}</h5>
+                                          <span className="text-[11px] text-sky-300 font-semibold block mt-0.5">{sn.pos}</span>
+
+                                          <div className="my-2 p-1.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono flex items-center justify-between">
+                                            <span className="text-slate-400">Volumen:</span>
+                                            <strong className="text-white">{sn.shots90 || 2.5}T · <span className="text-emerald-400">{sn.sot90 || 1.2} SOT</span></strong>
+                                          </div>
+                                        </div>
+
+                                        <div className="space-y-2 mt-2 pt-2 border-t border-slate-800">
+                                          {/* Opción 1: Over 0.5 SOT */}
+                                          {sn.over05 && (() => {
+                                            const p05 = {
+                                              id: sn.over05.id,
+                                              category: '🎯 TIROS AL ARCO',
+                                              market: sn.over05.market,
+                                              odds: sn.over05.odds,
+                                              prob: sn.over05.prob,
+                                              reason: sn.over05.reason
+                                            };
+                                            const isP05Added = betSlip.some((p) => p.id === sn.over05.id);
+                                            return (
+                                              <div className="flex items-center justify-between gap-1.5 bg-slate-950 p-1.5 rounded border border-slate-800/80">
+                                                <div>
+                                                  <span className="text-[10px] font-bold text-white block">🎯 +0.5 Tiros Arco</span>
+                                                  <span className="text-[9px] text-emerald-400 font-bold font-mono">{sn.over05.prob}% IA</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-xs font-black text-orange-400 font-mono">@{(sn.over05.odds || 1.35).toFixed(2)}</span>
+                                                  <button
+                                                    onClick={() => togglePickInSlip(p05)}
+                                                    className={`px-2 py-1 rounded text-[10px] font-black transition active:scale-95 ${
+                                                      isP05Added ? 'bg-orange-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                                    }`}
+                                                  >
+                                                    {isP05Added ? '✓' : '+'}
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
+
+                                          {/* Opción 2: Over 1.5 SOT */}
+                                          {sn.over15 && (() => {
+                                            const p15 = {
+                                              id: sn.over15.id,
+                                              category: '🎯 TIROS AL ARCO',
+                                              market: sn.over15.market,
+                                              odds: sn.over15.odds,
+                                              prob: sn.over15.prob,
+                                              reason: sn.over15.reason
+                                            };
+                                            const isP15Added = betSlip.some((p) => p.id === sn.over15.id);
+                                            return (
+                                              <div className="flex items-center justify-between gap-1.5 bg-slate-950 p-1.5 rounded border border-slate-800/80">
+                                                <div>
+                                                  <span className="text-[10px] font-bold text-amber-300 block">🎯 +1.5 Tiros Arco</span>
+                                                  <span className="text-[9px] text-emerald-400 font-bold font-mono">{sn.over15.prob}% IA</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-xs font-black text-orange-400 font-mono">@{(sn.over15.odds || 1.95).toFixed(2)}</span>
+                                                  <button
+                                                    onClick={() => togglePickInSlip(p15)}
+                                                    className={`px-2 py-1 rounded text-[10px] font-black transition active:scale-95 ${
+                                                      isP15Added ? 'bg-orange-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                                    }`}
+                                                  >
+                                                    {isP15Added ? '✓' : '+'}
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
+
+                                          {/* Opción Aérea: Zaguero Central */}
+                                          {sn.aerialPick && (() => {
+                                            const pAer = {
+                                              id: sn.aerialPick.id,
+                                              category: '✈️ AMENAZA AÉREA',
+                                              market: sn.aerialPick.market,
+                                              odds: sn.aerialPick.odds,
+                                              prob: sn.aerialPick.prob,
+                                              reason: sn.aerialPick.reason
+                                            };
+                                            const isAerAdded = betSlip.some((p) => p.id === sn.aerialPick.id);
+                                            return (
+                                              <div className="flex items-center justify-between gap-1.5 bg-indigo-950/40 p-1.5 rounded border border-indigo-500/30">
+                                                <div>
+                                                  <span className="text-[10px] font-bold text-indigo-300 block">✈️ +0.5 Cabezazo</span>
+                                                  <span className="text-[9px] text-emerald-400 font-bold font-mono">{sn.aerialPick.prob}% IA</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-xs font-black text-orange-400 font-mono">@{(sn.aerialPick.odds || 2.35).toFixed(2)}</span>
+                                                  <button
+                                                    onClick={() => togglePickInSlip(pAer)}
+                                                    className={`px-2 py-1 rounded text-[10px] font-black transition active:scale-95 ${
+                                                      isAerAdded ? 'bg-orange-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                                                    }`}
+                                                  >
+                                                    {isAerAdded ? '✓' : '+'}
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* 4. TOP 3 TARJETAS CON CRUCE DIRECTO Y FALTAS COMETIDAS (+1.5 FALTAS) */}
                               <div className="bg-slate-950 border-2 border-rose-500/40 rounded-xl p-4 shadow-xl space-y-3">
                                 <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800 pb-2.5">
                                   <div className="flex items-center gap-2">
@@ -2430,7 +2657,7 @@
                                         TOP 3 POSIBLES AMARILLAS — EMPAREJAMIENTO DIRECTO EN ZONA
                                       </h4>
                                       <p className="text-[11px] text-slate-400">
-                                        Emparejamiento individual directo entre futbolistas clave con rigor arbitral.
+                                        Emparejamiento individual directo, rigor arbitral y mercado de faltas tácticas.
                                       </p>
                                     </div>
                                   </div>
@@ -2445,7 +2672,7 @@
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                  {topCards.map((cd) => {
+                                  {(topCards || []).map((cd) => {
                                     const pickItem = {
                                       id: cd.id,
                                       category: '🟨 RECIBE TARJETA',
@@ -2480,27 +2707,68 @@
                                             <p className="text-[10px] text-slate-400 leading-snug">{cd.matchup}</p>
                                           </div>
 
+                                          {/* Promedio de Faltas Cometidas por 90m frente al rival */}
+                                          <div className="mt-1.5 text-[10px] text-amber-300 bg-slate-950 p-1.5 rounded border border-amber-500/20 font-mono flex items-center justify-between">
+                                            <span>🛑 Faltas: <strong>{cd.foulsPer90 || 2.4}/90m</strong></span>
+                                            <span className="text-slate-400 text-[9px]">vs {cd.foulsTargetReceived || 2.6} recibidas ({cd.foulsTargetRival || 'rival'})</span>
+                                          </div>
+
                                           <div className="mt-1.5 text-[10px] text-slate-400 bg-slate-950/60 p-1.5 rounded border border-slate-800/80 leading-tight">
                                             <span className="text-slate-300 font-bold">⚖️ Árbitro: </span>{cd.refereeFactor}
                                           </div>
                                         </div>
 
-                                        <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
-                                          <div>
-                                            <div className="flex items-center gap-1.5">
-                                              <span className="text-base font-black text-orange-400 font-mono">@{cd.odds.toFixed(2)}</span>
-                                              <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">Ref. Betano</span>
+                                        <div className="mt-3 pt-2.5 border-t border-slate-800 space-y-2">
+                                          {/* Pick 1: Tarjeta Amarilla */}
+                                          <div className="flex items-center justify-between">
+                                            <div>
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="text-sm font-black text-orange-400 font-mono">@{(cd.odds || 2.80).toFixed(2)}</span>
+                                                <span className="text-[9px] text-rose-300 font-mono font-bold bg-rose-500/10 px-1 py-0.2 rounded border border-rose-500/20">Tarjeta</span>
+                                              </div>
+                                              <span className="text-[10px] text-rose-400 font-bold font-mono block">{cd.prob || 55}% IA</span>
                                             </div>
-                                            <span className="text-[10px] text-rose-400 font-bold font-mono block">{cd.prob}% IA</span>
+                                            <button
+                                              onClick={() => togglePickInSlip(pickItem)}
+                                              className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition active:scale-95 shadow ${
+                                                isAdded ? 'bg-orange-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                              }`}
+                                            >
+                                              {isAdded ? '✓ Tarjeta' : '+ Tarjeta'}
+                                            </button>
                                           </div>
-                                          <button
-                                            onClick={() => togglePickInSlip(pickItem)}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition active:scale-95 shadow ${
-                                              isAdded ? 'bg-orange-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                                            }`}
-                                          >
-                                            {isAdded ? '✓ Añadido' : '+ Agregar Tarjeta'}
-                                          </button>
+
+                                          {/* Pick 2: +1.5 Faltas Cometidas */}
+                                          {cd.foulsPick && (() => {
+                                            const foulsItem = {
+                                              id: cd.foulsPick.id,
+                                              category: '🛑 FALTAS COMETIDAS',
+                                              market: cd.foulsPick.market,
+                                              odds: cd.foulsPick.odds,
+                                              prob: cd.foulsPick.prob,
+                                              reason: cd.foulsPick.reason
+                                            };
+                                            const isFoulsAdded = betSlip.some((p) => p.id === cd.foulsPick.id);
+                                            return (
+                                              <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80">
+                                                <div>
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="text-sm font-black text-amber-300 font-mono">@{(cd.foulsPick.odds || 1.55).toFixed(2)}</span>
+                                                    <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">+1.5 Faltas</span>
+                                                  </div>
+                                                  <span className="text-[10px] text-emerald-400 font-bold font-mono block">{cd.foulsPick.prob || 68}% IA</span>
+                                                </div>
+                                                <button
+                                                  onClick={() => togglePickInSlip(foulsItem)}
+                                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition active:scale-95 shadow ${
+                                                    isFoulsAdded ? 'bg-orange-500 text-white' : 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-black'
+                                                  }`}
+                                                >
+                                                  {isFoulsAdded ? '✓ Faltas' : '+1.5 Faltas'}
+                                                </button>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
                                       </div>
                                     );

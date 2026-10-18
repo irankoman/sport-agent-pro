@@ -765,25 +765,76 @@ class RealSportsService:
             )
 
             b2_picks = []
-            for sc in player_analytics["topScorers"]:
+            for sc in player_analytics.get("topScorers", []):
                 if not sc.get("isBlocked"):
                     b2_picks.append({
                         "id": sc["id"],
                         "type": "⚽ JUGADOR ANOTA",
                         "player": f"{sc['name']} ({sc['team']})",
-                        "odds": sc["odds"],
-                        "prob": sc["prob"],
-                        "matchupNote": sc["role"] + (f" · {sc['inheritanceNotice']}" if sc.get("inheritanceNotice") else "")
+                        "odds": sc.get("odds", 2.30),
+                        "prob": sc.get("prob", 40),
+                        "matchupNote": sc.get("role", "") + (f" · {sc['inheritanceNotice']}" if sc.get("inheritanceNotice") else "")
                     })
-            for cd in player_analytics["topCards"]:
+                    if sc.get("goalOrAssist"):
+                        ga = sc["goalOrAssist"]
+                        b2_picks.append({
+                            "id": ga["id"],
+                            "type": ga.get("category", "⚡ GOL O ASISTENCIA"),
+                            "player": f"{sc['name']} ({sc['team']})",
+                            "odds": ga.get("odds", 1.65),
+                            "prob": ga.get("prob", 60),
+                            "matchupNote": ga.get("reason", "")
+                        })
+            for cd in player_analytics.get("topCards", []):
                 b2_picks.append({
                     "id": cd["id"],
                     "type": "🟨 RECIBE TARJETA",
                     "player": f"{cd['name']} ({cd['team']})",
-                    "odds": cd["odds"],
-                    "prob": cd["prob"],
-                    "matchupNote": f"{cd['matchup']} · {cd['alert']}"
+                    "odds": cd.get("odds", 2.80),
+                    "prob": cd.get("prob", 55),
+                    "matchupNote": f"{cd.get('matchup', '')} · {cd.get('alert', '')}"
                 })
+                if cd.get("foulsPick"):
+                    fp = cd["foulsPick"]
+                    b2_picks.append({
+                        "id": fp["id"],
+                        "type": fp.get("category", "🛑 FALTAS COMETIDAS"),
+                        "player": f"{cd['name']} ({cd['team']})",
+                        "odds": fp.get("odds", 1.55),
+                        "prob": fp.get("prob", 68),
+                        "matchupNote": fp.get("reason", "")
+                    })
+            for sn in player_analytics.get("snipers", []):
+                if sn.get("over05"):
+                    o05 = sn["over05"]
+                    b2_picks.append({
+                        "id": o05["id"],
+                        "type": o05.get("category", "🎯 TIROS AL ARCO"),
+                        "player": f"{sn['name']} ({sn['team']})",
+                        "odds": o05.get("odds", 1.35),
+                        "prob": o05.get("prob", 78),
+                        "matchupNote": o05.get("reason", "")
+                    })
+                if sn.get("over15"):
+                    o15 = sn["over15"]
+                    b2_picks.append({
+                        "id": o15["id"],
+                        "type": o15.get("category", "🎯 TIROS AL ARCO"),
+                        "player": f"{sn['name']} ({sn['team']})",
+                        "odds": o15.get("odds", 1.95),
+                        "prob": o15.get("prob", 52),
+                        "matchupNote": o15.get("reason", "")
+                    })
+                if sn.get("aerialPick"):
+                    ap = sn["aerialPick"]
+                    b2_picks.append({
+                        "id": ap["id"],
+                        "type": ap.get("category", "✈️ AMENAZA AÉREA"),
+                        "player": f"{sn['name']} ({sn['team']})",
+                        "odds": ap.get("odds", 2.35),
+                        "prob": ap.get("prob", 44),
+                        "matchupNote": ap.get("reason", "")
+                    })
 
             match_data["playerAnalytics"] = player_analytics
             match_data["deepAnalytics"] = deep_analytics

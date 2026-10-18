@@ -408,3 +408,10 @@ class MultiSourceRosterEngine:
         roster = cls.get_live_roster(team_name, league_code, team_id, fixture_id)
         raw_cards = roster.get("cards", [])
         return [cd for cd in raw_cards if not cls.is_goalkeeper(cd.get("name", ""), team_name)]
+
+    @classmethod
+    def get_available_defenders(cls, team_name: str, fixture_id: str = "", league_code: str = "", team_id: str = "") -> List[str]:
+        """Retorna defensas activos de ESPN excluyendo bajas y porteros."""
+        roster = cls.get_live_roster(team_name, league_code, team_id, fixture_id)
+        raw_dfs = roster.get("defenders", [])
+        return [d for d in raw_dfs if cls.is_player_available(d, team_name, fixture_id) and not cls.is_goalkeeper(d, team_name)]
