@@ -158,8 +158,9 @@ extract_goals_by_team = RealSportsService.extract_goals_by_team
 def preload_matches_on_startup():
     """
     Precarga no bloqueante al arrancar el servidor:
-    Carga de inmediato el último caché persistido en `cache_matches.json` y lanza un hilo daemon
-    para sincronizar las 9 ligas en paralelo sin bloquear el puerto de Render.
+    Carga de inmediato el último caché persistido en `cache_matches.json`, lanza un hilo daemon
+    para sincronizar las 9 ligas en paralelo sin bloquear el puerto de Render, e inicia el
+    monitor ligero de alineaciones cada 3 minutos para partidos en vivo o a < 75 min.
     """
     try:
         RealSportsService._load_disk_cache()
@@ -168,6 +169,7 @@ def preload_matches_on_startup():
             kwargs={"force_refresh": True},
             daemon=True
         ).start()
+        RealSportsService.start_lineup_watcher_daemon()
     except Exception:
         pass
 
@@ -176,6 +178,15 @@ def ping_keep_alive():
     """Endpoint ultra-ligero (1ms) sin llamadas externas para mantener activo el contenedor en Render."""
     cached = RealSportsService.get_cached_matches_list()
     return {"status": "ok", "cached_matches": len(cached)}
+
+@app.get("/api/match/{event_id}/lineups")
+def get_match_lineups_live(event_id: str, force: bool = False):
+    """
+    Endpoint rápido (~0.3s) de Fase B: consulta `summary.rosters` de ESPN para confirmar
+    titulares (`starter === true`), actualizar `lineupStatus` ('official' vs 'probable'),
+    filtrar Goleadores & Props y reportar `benchedStars`.
+    """
+    return RealSportsService.get_or_refresh_match_lineups(event_id=event_id, force_network=force)
 
 @app.get("/api/real-matches")
 def get_real_matches(

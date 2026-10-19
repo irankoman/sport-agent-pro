@@ -44,9 +44,10 @@ class PlayerPropsEngine:
         home_roster = MultiSourceRosterEngine.get_live_roster(home_name, league_code, home_team_id, event_id=fixture_id)
         away_roster = MultiSourceRosterEngine.get_live_roster(away_name, league_code, away_team_id, event_id=fixture_id)
 
-        home_has_lineup = home_roster.get("hasOfficialLineup", False)
-        away_has_lineup = away_roster.get("hasOfficialLineup", False)
-        lineup_confirmed = is_official or (home_has_lineup and away_has_lineup)
+        home_has_lineup = bool(home_roster.get("hasOfficialLineup", False))
+        away_has_lineup = bool(away_roster.get("hasOfficialLineup", False))
+        has_real_official = bool(home_has_lineup or away_has_lineup)
+        lineup_confirmed = bool(has_real_official)
 
         home_avail_scorers = home_roster.get("scorers", [])
         away_avail_scorers = away_roster.get("scorers", [])
@@ -54,7 +55,20 @@ class PlayerPropsEngine:
         away_avail_cards = away_roster.get("cards", [])
         home_avail_dfs = home_roster.get("defenders", [])
         home_benched_star = home_roster.get("benchedStar")
+        away_benched_star = away_roster.get("benchedStar")
         home_benched_notice = home_roster.get("benchedStarNotice")
+        away_benched_notice = away_roster.get("benchedStarNotice")
+
+        benched_stars_all: List[str] = []
+        for b_name in (home_roster.get("benchedStars") or []) + (away_roster.get("benchedStars") or []):
+            if b_name and b_name not in benched_stars_all:
+                benched_stars_all.append(b_name)
+        benched_stars_all = benched_stars_all[:4]
+        combined_benched_notice = (
+            f"🪑 Banca hoy: {', '.join(benched_stars_all)} (Reemplazados por titulares en cancha)"
+            if benched_stars_all
+            else (home_benched_notice or away_benched_notice)
+        )
 
         # ---------------------------------------------------------------------
         # 1. ANOTADORES CALIBRADOS MATEMÁTICAMENTE DESDE UNIFIED ODDS (Poisson + Margen Betano 7.5%)
@@ -166,8 +180,10 @@ class PlayerPropsEngine:
             "goalOrAssist": sc1_ga,
             "fit": sc1_raw.get("fit", 97),
             "role": sc1_role,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": home_has_lineup,
+            "lineupStatus": "official" if home_has_lineup else "probable",
             "starterStatus": "TITULAR" if home_has_lineup else "PROBABLE",
             "isBlocked": False,
             "inherited": sc1_inherited,
@@ -192,8 +208,10 @@ class PlayerPropsEngine:
             "goalOrAssist": sc2_ga,
             "fit": sc2_raw.get("fit", 95),
             "role": sc2_raw.get("role", f"Segundo Atacante de {home_name}"),
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": home_has_lineup,
+            "lineupStatus": "official" if home_has_lineup else "probable",
             "starterStatus": "TITULAR" if home_has_lineup else "PROBABLE",
             "isBlocked": False,
             "inherited": False,
@@ -201,6 +219,7 @@ class PlayerPropsEngine:
             "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
         }
 
+        sc3_inherited = bool(away_benched_star)
         sc3 = {
             "id": f"{fixture_id}_sc3",
             "name": sc3_raw["name"],
@@ -217,11 +236,13 @@ class PlayerPropsEngine:
             "goalOrAssist": sc3_ga,
             "fit": sc3_raw.get("fit", 94),
             "role": sc3_raw.get("role", f"Referente Ofensivo de {away_name}"),
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": away_has_lineup,
+            "lineupStatus": "official" if away_has_lineup else "probable",
             "starterStatus": "TITULAR" if away_has_lineup else "PROBABLE",
             "isBlocked": False,
-            "inherited": False,
+            "inherited": sc3_inherited,
             "prob": sc3_prob,
             "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)"
         }
@@ -230,14 +251,15 @@ class PlayerPropsEngine:
 
         # Plan B táctico activado si una figura arrancó en la banca (ej: Jota, Kasper Høgh)
         tactical_plan_b = None
-        if lineup_confirmed and home_benched_star:
+        if lineup_confirmed and benched_stars_all:
+            benched_str = ", ".join(benched_stars_all[:3])
             tactical_plan_b = {
-                "benchedPlayer": home_benched_star,
-                "bannerNotice": home_benched_notice or f"🪑 EN BANCA HOY: {home_benched_star} (Suplentes - Herencia de penales activada en titulares)",
+                "benchedPlayer": benched_str,
+                "bannerNotice": combined_benched_notice,
                 "replacementStarter": sc1["name"],
                 "newOdds": sc1["odds"],
                 "projectedMinutes": "Suplente (En la Banca)",
-                "tacticalRationale": f"{sc1['name']} asume la referencia ofensiva titular y la ejecución del penal ante la suplencia hoy de {home_benched_star} (riesgo alto de minutos reducidos)."
+                "tacticalRationale": f"{sc1['name']} asume la referencia ofensiva titular ante la suplencia hoy de {benched_str}."
             }
 
         # ---------------------------------------------------------------------
@@ -433,30 +455,36 @@ class PlayerPropsEngine:
         # Asignar estados oficiales a tarjetas y snipers
         for sn in snipers_pool:
             is_h = (sn.get("team") == home_name)
-            has_l = home_has_lineup if is_h else away_has_lineup
+            has_l = bool(home_has_lineup if is_h else away_has_lineup)
+            sn["starter"] = True
             sn["isOfficialStarter"] = has_l
+            sn["lineupStatus"] = "official" if has_l else "probable"
             sn["starterStatus"] = "TITULAR" if has_l else "PROBABLE"
             sn["isStarter"] = True
             sn["isBlocked"] = False
 
         for cd in [card1, card2, card3]:
             is_h = (cd.get("team") == home_name)
-            has_l = home_has_lineup if is_h else away_has_lineup
+            has_l = bool(home_has_lineup if is_h else away_has_lineup)
+            cd["starter"] = True
             cd["isOfficialStarter"] = has_l
+            cd["lineupStatus"] = "official" if has_l else "probable"
             cd["starterStatus"] = "TITULAR" if has_l else "PROBABLE"
             cd["isStarter"] = True
             cd["isBlocked"] = False
 
         cards_pool = [card1, card2, card3]
 
+        lineup_status_code = "official" if lineup_confirmed else "probable"
         stage_code = "CONFIRMADO" if lineup_confirmed else "PREVIA"
         stage_label = (
-            "🟢 ONCE OFICIAL CONFIRMADO (~60m antes — Métricas recalculadas)"
+            "🟢 XI Oficial Confirmado"
             if lineup_confirmed
-            else "🟡 MODO PREVIA (Basado en XI Probable — Esperando confirmación oficial ~60m antes)"
+            else "🟡 XI Probable Inteligente (~60m antes se confirma XI Oficial)"
         )
 
         return {
+            "lineupStatus": lineup_status_code,
             "lineupStage": stage_code,
             "lineupStageLabel": stage_label,
             "isOfficialConfirmed": lineup_confirmed,
@@ -466,7 +494,8 @@ class PlayerPropsEngine:
             "snipers": snipers_pool,
             "topCards": cards_pool,
             "tacticalPlanB": tactical_plan_b,
-            "benchedStarNotice": home_benched_notice
+            "benchedStars": benched_stars_all,
+            "benchedStarNotice": combined_benched_notice
         }
 
     @classmethod
@@ -484,15 +513,15 @@ class PlayerPropsEngine:
         odds_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Devuelve tanto el estado Previa como el estado Confirmado con sincronización en vivo de ESPN.
+        Devuelve el estado de Goleadores & Props sincronizado con el Motor de Alineaciones en 2 Fases (probable vs official).
         """
-        previa_state = cls._generate_state_analytics(
+        state_data = cls._generate_state_analytics(
             fixture_id=fixture_id,
             home_name=home_name,
             away_name=away_name,
             referee_name=referee_name,
             referee_yellows=referee_yellows,
-            is_official=False,
+            is_official=is_official_confirmed,
             benched_p1=False,
             league_code=league_code,
             home_team_id=home_team_id,
@@ -500,28 +529,14 @@ class PlayerPropsEngine:
             odds_data=odds_data
         )
 
-        confirmed_state = cls._generate_state_analytics(
-            fixture_id=fixture_id,
-            home_name=home_name,
-            away_name=away_name,
-            referee_name=referee_name,
-            referee_yellows=referee_yellows,
-            is_official=True,
-            benched_p1=False,
-            league_code=league_code,
-            home_team_id=home_team_id,
-            away_team_id=away_team_id,
-            odds_data=odds_data
-        )
-
-        # Si el partido tiene alineación oficial en vivo desde ESPN, activar CONFIRMADO
-        is_actually_confirmed = is_official_confirmed or confirmed_state.get("isOfficialConfirmed", False)
-        active = confirmed_state if is_actually_confirmed else previa_state
+        is_actually_confirmed = bool(state_data.get("hasOfficialLineup", False))
 
         return {
             "currentStage": "CONFIRMADO" if is_actually_confirmed else "PREVIA",
+            "lineupStatus": "official" if is_actually_confirmed else "probable",
             "marketBadge": "📊 Cuota Mercado (Ref. Betano/Live)",
-            "previa": previa_state,
-            "confirmed": confirmed_state,
-            **active
+            "previa": state_data,
+            "confirmed": state_data,
+            **state_data
         }
+

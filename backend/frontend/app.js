@@ -1513,13 +1513,55 @@
         selectedMatchIdRef.current = match.id;
         lastInspectedMatchRef.current = match;
         setSelectedMatchId(match.id);
-        const isConf = match.isLive || match.isFinished || Boolean(match.playerAnalytics?.isOfficialConfirmed);
+        const isConf = (match.lineupStatus === 'official') || Boolean(match.playerAnalytics?.hasOfficialLineup);
         setLineupMode(isConf ? 'CONFIRMADO' : 'PREVIA');
         const defaultIds = match.suggestedProfiles?.conservador?.pickIds || [];
         const allP = [...(match.betanoLevel1 || []), ...(match.betanoLevel2 || [])];
         const picks = allP.filter((p) => defaultIds.includes(p.id));
         setBetSlip(picks.length > 0 ? picks : allP.slice(0, 2));
         setActiveProfileName('conservador');
+      };
+
+      const refreshMatchLineupsBackground = async (matchObj) => {
+        try {
+          const eid = matchObj?.id || matchObj?.espnEventId;
+          if (!eid) return;
+          const res = await fetch(`/api/match/${encodeURIComponent(eid)}/lineups`);
+          if (!res.ok) return;
+          const lData = await res.json();
+          if (!lData || !lData.playerAnalytics) return;
+
+          setMatches((prev) => {
+            if (!Array.isArray(prev)) return prev;
+            const next = prev.map((m) => {
+              if (m && (m.id === matchObj.id || (lData.matchId && m.id === lData.matchId))) {
+                const updated = {
+                  ...m,
+                  lineupStatus: lData.lineupStatus || m.lineupStatus || 'probable',
+                  benchedStars: Array.isArray(lData.benchedStars) ? lData.benchedStars : (m.benchedStars || []),
+                  lineupSummary: lData.lineupSummary || m.lineupSummary,
+                  teamStatus: lData.teamStatus || m.teamStatus,
+                  bajas: lData.bajas || m.bajas,
+                  playerAnalytics: lData.playerAnalytics || m.playerAnalytics,
+                  betanoLevel2: Array.isArray(lData.betanoLevel2) && lData.betanoLevel2.length > 0 ? lData.betanoLevel2 : m.betanoLevel2
+                };
+                if (selectedMatchIdRef.current === updated.id) {
+                  lastInspectedMatchRef.current = updated;
+                }
+                return updated;
+              }
+              return m;
+            });
+            return next;
+          });
+          if (lData.lineupStatus === 'official') {
+            setLineupMode('CONFIRMADO');
+          } else {
+            setLineupMode('PREVIA');
+          }
+        } catch (err) {
+          // Silencioso en segundo plano para no afectar UX
+        }
       };
 
       const openMatchDetail = (match) => {
@@ -1530,6 +1572,7 @@
         initMatchSelection(match);
         setModalTab('tiros');
         setShowDetailModal(true);
+        refreshMatchLineupsBackground(match);
       };
 
       const handleLeagueSelect = (leagueId) => {
@@ -2130,16 +2173,32 @@
                               </div>
                             </td>
 
-                            {/* Alineación (Titular vs Mixto) */}
+                            {/* Alineación (Titular vs Mixto) — Formato Ultra-Compacto 1 Sola Línea */}
                             <td className="py-3 px-4">
-                              <div className="flex flex-col gap-1">
-                                <span className="badge-titular px-2 py-0.5 rounded text-[10px] font-bold w-fit">
-                                  L: {m.lineupSummary?.homeType || 'XI Titular'}
-                                </span>
-                                <span className="badge-mixto px-2 py-0.5 rounded text-[10px] font-bold w-fit">
-                                  V: {m.lineupSummary?.awayType || 'Titulares Habituales'}
-                                </span>
-                              </div>
+                              {(() => {
+                                const lStatus = m?.lineupStatus || m?.lineupSummary?.status || (m?.playerAnalytics?.hasOfficialLineup ? 'official' : 'probable');
+                                const hBajas = Array.isArray(m?.bajas?.home) ? m.bajas.home.length : 0;
+                                const aBajas = Array.isArray(m?.bajas?.away) ? m.bajas.away.length : 0;
+                                const hasRot = (hBajas + aBajas) > 0;
+                                const compactText = m?.lineupSummary?.compactBadge || (
+                                  lStatus === 'official'
+                                    ? (hasRot ? '🟢 XI Oficial · Mixto' : '🟢 XI Oficial · Titular')
+                                    : (hasRot ? '🟡 XI Probable · Mixto' : '🟡 XI Probable · Titular')
+                                );
+                                const isOff = (lStatus === 'official');
+                                return (
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold font-mono whitespace-nowrap border ${
+                                      isOff
+                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                                        : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                    }`}
+                                    title={`${m?.homeTeam || 'Local'}: ${m?.lineupSummary?.homeCompact || compactText} | ${m?.awayTeam || 'Visita'}: ${m?.lineupSummary?.awayCompact || compactText}`}
+                                  >
+                                    {compactText}
+                                  </span>
+                                );
+                              })()}
                             </td>
 
                             {/* Clima y Superficie */}
@@ -2210,8 +2269,13 @@
             const isFav = isMatchFavorite(selectedMatch);
             const pm = selectedMatch.postMatchReport || {};
 
-            // Analítica activa según modo (Previa vs Once Oficial Confirmado; forzado a CONFIRMADO en vivo/finalizado)
-            const forceConfirmed = Boolean(selectedMatch.isLive || isFin || selectedMatch.playerAnalytics?.isOfficialConfirmed || lineupMode === 'CONFIRMADO');
+            // Analítica activa según Motor de Alineaciones en 2 Fases (official vs probable)
+            const matchLineupStatus = (
+              selectedMatch?.lineupStatus === 'official' ||
+              selectedMatch?.playerAnalytics?.lineupStatus === 'official' ||
+              Boolean(selectedMatch?.playerAnalytics?.hasOfficialLineup)
+            ) ? 'official' : 'probable';
+            const forceConfirmed = (matchLineupStatus === 'official');
             const activeAnalytics = (forceConfirmed
               ? (selectedMatch.playerAnalytics?.confirmed || selectedMatch.playerAnalytics)
               : (selectedMatch.playerAnalytics?.previa || selectedMatch.playerAnalytics)
@@ -2227,6 +2291,9 @@
             const topCards = Array.isArray(activeAnalytics.topCards) ? activeAnalytics.topCards : [];
             const tacticalPlanB = activeAnalytics.tacticalPlanB || null;
             const snipers = Array.isArray(activeAnalytics.snipers) ? activeAnalytics.snipers : [];
+            const benchedStarsList = (Array.isArray(selectedMatch?.benchedStars) && selectedMatch.benchedStars.length > 0)
+              ? selectedMatch.benchedStars
+              : (Array.isArray(activeAnalytics?.benchedStars) ? activeAnalytics.benchedStars : []);
 
             const shotsAnalytics = activeDeep.shotsAnalytics || {};
             const cornersAndXg = activeDeep.cornersAndXgMatrix || {};
@@ -3589,11 +3656,11 @@
                                       <span>📊</span> Cuota Mercado (Ref. Betano/Live)
                                     </span>
                                     <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
-                                      (activeAnalytics.hasOfficialLineup || (lineupMode === 'CONFIRMADO' && selectedMatch.playerAnalytics?.isOfficialConfirmed))
+                                      matchLineupStatus === 'official'
                                         ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                                         : 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
                                     }`}>
-                                      {(activeAnalytics.hasOfficialLineup || (lineupMode === 'CONFIRMADO' && selectedMatch.playerAnalytics?.isOfficialConfirmed)) ? '🟢 Once Validado Oficial' : '🟡 Previa Estimada (XI Probable)'}
+                                      {matchLineupStatus === 'official' ? '🟢 XI Oficial Confirmado' : '🟡 XI Probable Inteligente'}
                                     </span>
                                   </div>
                                 </div>
@@ -3609,6 +3676,7 @@
                                       reason: sc.role
                                     };
                                     const isAdded = betSlip.some((p) => p.id === sc.id);
+                                    const isPlayerOfficial = (matchLineupStatus === 'official' && sc?.lineupStatus === 'official' && sc?.starter === true && sc?.isOfficialStarter === true);
 
                                     return (
                                       <div
@@ -3626,23 +3694,22 @@
                                         <div>
                                           <div className="flex items-center justify-between mb-1.5 gap-1">
                                             <span className="text-[10px] font-black uppercase text-slate-400 font-mono truncate">{sc.team}</span>
-                                            {sc.isBlocked || sc.starterStatus === 'SUPLENTE' ? (
-                                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
-                                                🪑 EN LA BANCA (Suplente Hoy - Riesgo Minutos)
-                                              </span>
-                                            ) : sc.inherited ? (
-                                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-mono">
-                                                🔥 HEREDA PENALES (+EV)
-                                              </span>
-                                            ) : (sc.isOfficialStarter && !sc.isBlocked) ? (
-                                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
-                                                ✓ TITULAR
-                                              </span>
-                                            ) : (
-                                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
-                                                🟡 XI PROBABLE (Por Confirmar)
-                                              </span>
-                                            )}
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              {isPlayerOfficial ? (
+                                                <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
+                                                  ✅ Titular
+                                                </span>
+                                              ) : (
+                                                <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
+                                                  ⏳ Probable
+                                                </span>
+                                              )}
+                                              {sc.inherited && (
+                                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-mono">
+                                                  +EV
+                                                </span>
+                                              )}
+                                            </div>
                                           </div>
 
                                           <h5 className="text-sm font-black text-white">{sc.name}</h5>
@@ -3683,12 +3750,6 @@
                                             <span className="text-amber-400 font-bold">Jerarquía: </span>
                                             {sc.role}
                                           </div>
-
-                                          {sc.inheritanceNotice && (
-                                            <div className="mt-2 text-[10px] font-black text-amber-300 bg-amber-500/10 p-1.5 rounded border border-amber-500/30">
-                                              {sc.inheritanceNotice}
-                                            </div>
-                                          )}
 
                                           {/* Mercado de Doble Amenaza: Gol o Asistencia */}
                                           {sc.goalOrAssist && (() => {
@@ -3764,45 +3825,15 @@
                                   })}
                                 </div>
 
-                                {/* Plan B */}
-                                {tacticalPlanB && (
-                                  <div className="bg-amber-500/10 border-2 border-amber-400/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-                                    <div className="flex items-center gap-2.5">
-                                      <span className="text-xl">🔄</span>
-                                      <div>
-                                        <div className="font-black text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
-                                          <span>{tacticalPlanB.bannerNotice || `🪑 EN BANCA HOY: ${tacticalPlanB.benchedPlayer} (Suplente - Herencia Activa)`}</span>
-                                          <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-bold font-mono">Plan B</span>
-                                        </div>
-                                        <p className="text-slate-300 mt-0.5">{tacticalPlanB.tacticalRationale}</p>
-                                      </div>
+                                {/* Píldora Compacta Única de Suplentes en la Banca */}
+                                {(benchedStarsList.length > 0 || (tacticalPlanB && tacticalPlanB.benchedPlayer)) && (() => {
+                                  const namesStr = benchedStarsList.length > 0 ? benchedStarsList.join(', ') : tacticalPlanB.benchedPlayer;
+                                  return (
+                                    <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold font-mono">
+                                      <span>🪑 Banca hoy: {namesStr} (Reemplazados por titulares en cancha)</span>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                      <div className="text-right font-mono">
-                                        <span className="text-[10px] text-slate-400 block">Cuota Titular:</span>
-                                        <span className="text-sm font-black text-amber-300">@{(tacticalPlanB.newOdds || 2.10).toFixed(2)}</span>
-                                      </div>
-                                      <button
-                                        onClick={() => {
-                                          const rep = topScorers.find(s => s.name === tacticalPlanB.replacementStarter);
-                                          if (rep) {
-                                            togglePickInSlip({
-                                              id: rep.id,
-                                              category: '⚽ JUGADOR ANOTA',
-                                              market: `${rep.name} (${rep.team}) - Anota en Cualquier Momento (Plan B)`,
-                                              odds: rep.odds,
-                                              prob: rep.prob,
-                                              reason: `Plan B activado: hereda penales de ${tacticalPlanB.benchedPlayer}`
-                                            });
-                                          }
-                                        }}
-                                        className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition active:scale-95 shadow"
-                                      >
-                                        + Cargar Plan B al Cupón
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
+                                  );
+                                })()}
                               </div>
 
                               {/* ========================================================================= */}
@@ -3834,6 +3865,7 @@
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                                   {(snipers || []).map((sn) => {
                                     const isAerial = Boolean(sn.isAerial);
+                                    const isSnOfficial = (matchLineupStatus === 'official' && sn?.lineupStatus === 'official' && sn?.starter === true && sn?.isOfficialStarter === true);
                                     return (
                                       <div
                                         key={sn.id}
@@ -3845,17 +3877,13 @@
                                           <div className="flex items-center justify-between mb-1.5 gap-1">
                                             <span className="text-[10px] font-black uppercase text-slate-400 font-mono truncate">{sn.team}</span>
                                             <div className="flex items-center gap-1">
-                                              {sn.isBlocked || sn.starterStatus === 'SUPLENTE' ? (
-                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
-                                                  🪑 BANCA
-                                                </span>
-                                              ) : (sn.isOfficialStarter && !sn.isBlocked) ? (
+                                              {isSnOfficial ? (
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
-                                                  ✓ TITULAR
+                                                  ✅ Titular
                                                 </span>
                                               ) : (
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
-                                                  🟡 PROBABLE
+                                                  ⏳ Probable
                                                 </span>
                                               )}
                                               {isAerial ? (
@@ -4013,6 +4041,7 @@
                                       reason: `${cd.matchup} · ${cd.alert}`
                                     };
                                     const isAdded = betSlip.some((p) => p.id === cd.id);
+                                    const isCdOfficial = (matchLineupStatus === 'official' && cd?.lineupStatus === 'official' && cd?.starter === true && cd?.isOfficialStarter === true);
 
                                     return (
                                       <div
@@ -4025,17 +4054,13 @@
                                           <div className="flex items-center justify-between mb-1">
                                             <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">{cd.team}</span>
                                             <div className="flex items-center gap-1">
-                                              {cd.isBlocked || cd.starterStatus === 'SUPLENTE' ? (
-                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
-                                                  🪑 BANCA
-                                                </span>
-                                              ) : (cd.isOfficialStarter && !cd.isBlocked) ? (
+                                              {isCdOfficial ? (
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
-                                                  ✓ TITULAR
+                                                  ✅ Titular
                                                 </span>
                                               ) : (
                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
-                                                  🟡 PROBABLE
+                                                  ⏳ Probable
                                                 </span>
                                               )}
                                               <span className="text-[10px] font-bold text-rose-400 font-mono">🟨 Alta Frecuencia</span>

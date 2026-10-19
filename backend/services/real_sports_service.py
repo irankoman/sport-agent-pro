@@ -883,11 +883,13 @@ class RealSportsService:
             except Exception:
                 pass
 
-        # Si hay partidos EN VIVO, descargar sus resúmenes en paralelo ahora mismo (< 0.4s)
-        if live_summary_targets:
+        # Precargar resúmenes en vivo y plantillas de equipos en memoria en paralelo antes de construir partidos
+        summary_prefetch_list = live_summary_targets if live_summary_targets else []
+        roster_prefetch_list = bg_roster_targets if bg_roster_targets else []
+        if summary_prefetch_list or roster_prefetch_list:
             MultiSourceRosterEngine.prefetch_summaries_and_rosters_parallel(
-                summary_targets=live_summary_targets,
-                roster_targets=[],
+                summary_targets=summary_prefetch_list,
+                roster_targets=roster_prefetch_list,
                 timeout=4.0
             )
 
@@ -1229,6 +1231,37 @@ class RealSportsService:
                 odds_data=odds_data
             )
 
+            match_lineup_status = player_analytics.get("lineupStatus") or ("official" if player_analytics.get("hasOfficialLineup") else "probable")
+            benched_stars_list = player_analytics.get("benchedStars") or []
+            has_any_bajas = bool(home_bajas or away_bajas)
+
+            if match_lineup_status == "official":
+                h_compact = "🟢 XI Oficial · Mixto" if home_bajas else "🟢 XI Oficial · Titular"
+                a_compact = "🟢 XI Oficial · Mixto" if away_bajas else "🟢 XI Oficial · Titular"
+                compact_badge = "🟢 XI Oficial · Mixto" if has_any_bajas else "🟢 XI Oficial · Titular"
+            else:
+                h_compact = "🟡 XI Probable · Mixto" if home_bajas else "🟡 XI Probable · Titular"
+                a_compact = "🟡 XI Probable · Mixto" if away_bajas else "🟡 XI Probable · Titular"
+                compact_badge = "🟡 XI Probable · Mixto" if has_any_bajas else "🟡 XI Probable · Titular"
+
+            match_data["lineupStatus"] = match_lineup_status
+            match_data["benchedStars"] = benched_stars_list
+            match_data["lineupSummary"] = {
+                "status": match_lineup_status,
+                "compactBadge": compact_badge,
+                "homeCompact": h_compact,
+                "awayCompact": a_compact,
+                "homeType": h_compact,
+                "homeBadge": "green" if (match_lineup_status == "official" and not home_bajas) else "amber",
+                "awayType": a_compact,
+                "awayBadge": "green" if (match_lineup_status == "official" and not away_bajas) else "amber"
+            }
+            if isinstance(match_data.get("teamStatus"), dict):
+                if isinstance(match_data["teamStatus"].get("home"), dict):
+                    match_data["teamStatus"]["home"]["lineupStatus"] = h_compact
+                if isinstance(match_data["teamStatus"].get("away"), dict):
+                    match_data["teamStatus"]["away"]["lineupStatus"] = a_compact
+
             # Analítica estadística y táctica profunda (Tiros al arco, clima, matriz córners/xG, H2H, psicología, Bet Builder)
             deep_analytics = DeepStatsEngine.build_deep_analytics(
                 fixture_id=lookup_event_id,
@@ -1245,77 +1278,7 @@ class RealSportsService:
                 away_team_id=away_team_id
             )
 
-            b2_picks = []
-            for sc in player_analytics.get("topScorers", []):
-                if not sc.get("isBlocked"):
-                    b2_picks.append({
-                        "id": sc["id"],
-                        "type": "⚽ JUGADOR ANOTA",
-                        "player": f"{sc['name']} ({sc['team']})",
-                        "odds": sc.get("odds", 2.30),
-                        "prob": sc.get("prob", 40),
-                        "matchupNote": sc.get("role", "") + (f" · {sc['inheritanceNotice']}" if sc.get("inheritanceNotice") else "")
-                    })
-                    if sc.get("goalOrAssist"):
-                        ga = sc["goalOrAssist"]
-                        b2_picks.append({
-                            "id": ga["id"],
-                            "type": ga.get("category", "⚡ GOL O ASISTENCIA"),
-                            "player": f"{sc['name']} ({sc['team']})",
-                            "odds": ga.get("odds", 1.65),
-                            "prob": ga.get("prob", 60),
-                            "matchupNote": ga.get("reason", "")
-                        })
-            for cd in player_analytics.get("topCards", []):
-                b2_picks.append({
-                    "id": cd["id"],
-                    "type": "🟨 RECIBE TARJETA",
-                    "player": f"{cd['name']} ({cd['team']})",
-                    "odds": cd.get("odds", 2.80),
-                    "prob": cd.get("prob", 55),
-                    "matchupNote": f"{cd.get('matchup', '')} · {cd.get('alert', '')}"
-                })
-                if cd.get("foulsPick"):
-                    fp = cd["foulsPick"]
-                    b2_picks.append({
-                        "id": fp["id"],
-                        "type": fp.get("category", "🛑 FALTAS COMETIDAS"),
-                        "player": f"{cd['name']} ({cd['team']})",
-                        "odds": fp.get("odds", 1.55),
-                        "prob": fp.get("prob", 68),
-                        "matchupNote": fp.get("reason", "")
-                    })
-            for sn in player_analytics.get("snipers", []):
-                if sn.get("over05"):
-                    o05 = sn["over05"]
-                    b2_picks.append({
-                        "id": o05["id"],
-                        "type": o05.get("category", "🎯 TIROS AL ARCO"),
-                        "player": f"{sn['name']} ({sn['team']})",
-                        "odds": o05.get("odds", 1.35),
-                        "prob": o05.get("prob", 78),
-                        "matchupNote": o05.get("reason", "")
-                    })
-                if sn.get("over15"):
-                    o15 = sn["over15"]
-                    b2_picks.append({
-                        "id": o15["id"],
-                        "type": o15.get("category", "🎯 TIROS AL ARCO"),
-                        "player": f"{sn['name']} ({sn['team']})",
-                        "odds": o15.get("odds", 1.95),
-                        "prob": o15.get("prob", 52),
-                        "matchupNote": o15.get("reason", "")
-                    })
-                if sn.get("aerialPick"):
-                    ap = sn["aerialPick"]
-                    b2_picks.append({
-                        "id": ap["id"],
-                        "type": ap.get("category", "✈️ AMENAZA AÉREA"),
-                        "player": f"{sn['name']} ({sn['team']})",
-                        "odds": ap.get("odds", 2.35),
-                        "prob": ap.get("prob", 44),
-                        "matchupNote": ap.get("reason", "")
-                    })
+            b2_picks = cls._build_level2_picks_from_analytics(player_analytics)
 
             match_data["playerAnalytics"] = player_analytics
             match_data["deepAnalytics"] = deep_analytics
@@ -1379,3 +1342,264 @@ class RealSportsService:
             ).start()
 
         return processed_matches
+
+    @classmethod
+    def _build_level2_picks_from_analytics(cls, player_analytics: Dict[str, Any]) -> List[Dict[str, Any]]:
+        b2_picks = []
+        if not isinstance(player_analytics, dict):
+            return b2_picks
+        for sc in player_analytics.get("topScorers", []):
+            if not sc.get("isBlocked"):
+                b2_picks.append({
+                    "id": sc["id"],
+                    "type": "⚽ JUGADOR ANOTA",
+                    "player": f"{sc['name']} ({sc['team']})",
+                    "odds": sc.get("odds", 2.30),
+                    "prob": sc.get("prob", 40),
+                    "matchupNote": sc.get("role", "") + (f" · {sc['inheritanceNotice']}" if sc.get("inheritanceNotice") else "")
+                })
+                if sc.get("goalOrAssist"):
+                    ga = sc["goalOrAssist"]
+                    b2_picks.append({
+                        "id": ga["id"],
+                        "type": ga.get("category", "⚡ GOL O ASISTENCIA"),
+                        "player": f"{sc['name']} ({sc['team']})",
+                        "odds": ga.get("odds", 1.65),
+                        "prob": ga.get("prob", 60),
+                        "matchupNote": ga.get("reason", "")
+                    })
+        for cd in player_analytics.get("topCards", []):
+            b2_picks.append({
+                "id": cd["id"],
+                "type": "🟨 RECIBE TARJETA",
+                "player": f"{cd['name']} ({cd['team']})",
+                "odds": cd.get("odds", 2.80),
+                "prob": cd.get("prob", 55),
+                "matchupNote": f"{cd.get('matchup', '')} · {cd.get('alert', '')}"
+            })
+            if cd.get("foulsPick"):
+                fp = cd["foulsPick"]
+                b2_picks.append({
+                    "id": fp["id"],
+                    "type": fp.get("category", "🛑 FALTAS COMETIDAS"),
+                    "player": f"{cd['name']} ({cd['team']})",
+                    "odds": fp.get("odds", 1.55),
+                    "prob": fp.get("prob", 68),
+                    "matchupNote": fp.get("reason", "")
+                })
+        for sn in player_analytics.get("snipers", []):
+            if sn.get("over05"):
+                o05 = sn["over05"]
+                b2_picks.append({
+                    "id": o05["id"],
+                    "type": o05.get("category", "🎯 TIROS AL ARCO"),
+                    "player": f"{sn['name']} ({sn['team']})",
+                    "odds": o05.get("odds", 1.35),
+                    "prob": o05.get("prob", 78),
+                    "matchupNote": o05.get("reason", "")
+                })
+            if sn.get("over15"):
+                o15 = sn["over15"]
+                b2_picks.append({
+                    "id": o15["id"],
+                    "type": o15.get("category", "🎯 TIROS AL ARCO"),
+                    "player": f"{sn['name']} ({sn['team']})",
+                    "odds": o15.get("odds", 1.95),
+                    "prob": o15.get("prob", 52),
+                    "matchupNote": o15.get("reason", "")
+                })
+            if sn.get("aerialPick"):
+                ap = sn["aerialPick"]
+                b2_picks.append({
+                    "id": ap["id"],
+                    "type": ap.get("category", "✈️ AMENAZA AÉREA"),
+                    "player": f"{sn['name']} ({sn['team']})",
+                    "odds": ap.get("odds", 2.35),
+                    "prob": ap.get("prob", 44),
+                    "matchupNote": ap.get("reason", "")
+                })
+        return b2_picks
+
+    @classmethod
+    def get_or_refresh_match_lineups(cls, event_id: str, force_network: bool = False) -> Dict[str, Any]:
+        """
+        Endpoint rápido (/api/match/<event_id>/lineups) que consulta `summary.rosters` de ESPN
+        para el partido indicado, invalida cachés previos si ya existen `starter === true`,
+        y recalcula titulares y Goleadores & Props en < 0.3s.
+        """
+        target_id = str(event_id or "").strip()
+        if not target_id:
+            return {"status": "not_found", "lineupStatus": "probable", "benchedStars": []}
+
+        matches_list = cls.get_cached_matches_list()
+        match_obj = None
+        for m in matches_list:
+            if not isinstance(m, dict):
+                continue
+            if str(m.get("id") or "") == target_id or str(m.get("espnEventId") or "") == target_id:
+                match_obj = m
+                break
+
+        if not match_obj:
+            return {"status": "not_found", "lineupStatus": "probable", "benchedStars": []}
+
+        l_code = str(match_obj.get("espnLeagueCode") or "")
+        espn_eid = str(match_obj.get("espnEventId") or "")
+        ev_id = str(match_obj.get("id") or "")
+        lookup_eid = espn_eid or ev_id
+        home_name = str(match_obj.get("homeTeam") or "Local")
+        away_name = str(match_obj.get("awayTeam") or "Visita")
+        home_tid = str(match_obj.get("homeTeamId") or "")
+        away_tid = str(match_obj.get("awayTeamId") or "")
+        is_live_or_fin = bool(match_obj.get("isLive") or match_obj.get("isFinished"))
+
+        try:
+            # Consultar summary.rosters de ESPN con timeout corto (~2.8s)
+            if l_code and espn_eid and espn_eid.isdigit():
+                MultiSourceRosterEngine._fetch_single_summary(l_code, espn_eid, timeout=2.8, force=force_network)
+
+            ref_obj = match_obj.get("referee") or {}
+            ref_name_raw = str(ref_obj.get("name") or "Árbitro Oficial").split(" (")[0]
+            ref_yellows = float(ref_obj.get("avgYellows") or 4.2)
+
+            odds_det = match_obj.get("oddsDetails") or {}
+            unified_odds = match_obj.get("unifiedOdds") or {}
+            odds_input = {
+                "unifiedOdds": unified_odds,
+                "home_win_odds": odds_det.get("homeWin", 1.85),
+                "away_win_odds": odds_det.get("awayWin", 3.80),
+                "pre_home_win_odds": odds_det.get("preHomeWin", odds_det.get("homeWin", 1.85)),
+                "pre_away_win_odds": odds_det.get("preAwayWin", odds_det.get("awayWin", 3.80)),
+                "lambda_home": unified_odds.get("lambda_home", 1.45),
+                "lambda_away": unified_odds.get("lambda_away", 1.15)
+            }
+
+            home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, lookup_eid, league_code=l_code, team_id=home_tid)
+            away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, lookup_eid, league_code=l_code, team_id=away_tid)
+
+            new_analytics = PlayerPropsEngine.build_player_analytics(
+                fixture_id=lookup_eid,
+                home_name=home_name,
+                away_name=away_name,
+                referee_name=ref_name_raw,
+                referee_yellows=ref_yellows,
+                is_official_confirmed=is_live_or_fin,
+                league_code=l_code,
+                home_team_id=home_tid,
+                away_team_id=away_tid,
+                odds_data=odds_input
+            )
+
+            lineup_status = new_analytics.get("lineupStatus") or ("official" if new_analytics.get("hasOfficialLineup") else "probable")
+            benched_stars = new_analytics.get("benchedStars") or []
+            has_any_bajas = bool(home_bajas or away_bajas)
+
+            if lineup_status == "official":
+                h_compact = "🟢 XI Oficial · Mixto" if home_bajas else "🟢 XI Oficial · Titular"
+                a_compact = "🟢 XI Oficial · Mixto" if away_bajas else "🟢 XI Oficial · Titular"
+                compact_badge = "🟢 XI Oficial · Mixto" if has_any_bajas else "🟢 XI Oficial · Titular"
+            else:
+                h_compact = "🟡 XI Probable · Mixto" if home_bajas else "🟡 XI Probable · Titular"
+                a_compact = "🟡 XI Probable · Mixto" if away_bajas else "🟡 XI Probable · Titular"
+                compact_badge = "🟡 XI Probable · Mixto" if has_any_bajas else "🟡 XI Probable · Titular"
+
+            new_lineup_summary = {
+                "status": lineup_status,
+                "compactBadge": compact_badge,
+                "homeCompact": h_compact,
+                "awayCompact": a_compact,
+                "homeType": h_compact,
+                "homeBadge": "green" if (lineup_status == "official" and not home_bajas) else "amber",
+                "awayType": a_compact,
+                "awayBadge": "green" if (lineup_status == "official" and not away_bajas) else "amber"
+            }
+
+            b2_picks = cls._build_level2_picks_from_analytics(new_analytics)
+
+            # Actualizar en memoria el partido cacheado
+            match_obj["lineupStatus"] = lineup_status
+            match_obj["benchedStars"] = benched_stars
+            match_obj["lineupSummary"] = new_lineup_summary
+            match_obj["bajas"] = {"home": home_bajas, "away": away_bajas}
+            match_obj["playerAnalytics"] = new_analytics
+            match_obj["betanoLevel2"] = b2_picks
+            if isinstance(match_obj.get("teamStatus"), dict):
+                if isinstance(match_obj["teamStatus"].get("home"), dict):
+                    match_obj["teamStatus"]["home"]["lineupStatus"] = h_compact
+                    match_obj["teamStatus"]["home"]["bajas"] = home_bajas
+                if isinstance(match_obj["teamStatus"].get("away"), dict):
+                    match_obj["teamStatus"]["away"]["lineupStatus"] = a_compact
+                    match_obj["teamStatus"]["away"]["bajas"] = away_bajas
+
+            return {
+                "status": "ok",
+                "matchId": ev_id,
+                "espnEventId": espn_eid,
+                "lineupStatus": lineup_status,
+                "benchedStars": benched_stars,
+                "lineupSummary": new_lineup_summary,
+                "teamStatus": match_obj.get("teamStatus"),
+                "bajas": match_obj.get("bajas"),
+                "playerAnalytics": new_analytics,
+                "betanoLevel2": b2_picks
+            }
+        except Exception as e:
+            logging.debug(f"Error refreshing match lineups for {target_id}: {e}")
+            return {
+                "status": "cached",
+                "matchId": ev_id,
+                "espnEventId": espn_eid,
+                "lineupStatus": match_obj.get("lineupStatus", "probable"),
+                "benchedStars": match_obj.get("benchedStars", []),
+                "lineupSummary": match_obj.get("lineupSummary"),
+                "teamStatus": match_obj.get("teamStatus"),
+                "bajas": match_obj.get("bajas"),
+                "playerAnalytics": match_obj.get("playerAnalytics"),
+                "betanoLevel2": match_obj.get("betanoLevel2", [])
+            }
+
+    _lineup_watcher_started = False
+
+    @classmethod
+    def start_lineup_watcher_daemon(cls):
+        """
+        Actualizador en segundo plano cada 3 minutos (180s) que revisa ÚNICAMENTE
+        los partidos EN VIVO o a < 75 minutos de iniciar para detectar alineaciones confirmadas.
+        """
+        if cls._lineup_watcher_started:
+            return
+        cls._lineup_watcher_started = True
+
+        def _watcher_loop():
+            import time as _t
+            while True:
+                _t.sleep(180)
+                try:
+                    now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    matches = cls.get_cached_matches_list()
+                    targets = []
+                    for m in matches:
+                        if not isinstance(m, dict):
+                            continue
+                        if m.get("isFinished"):
+                            continue
+                        if m.get("isLive") or m.get("dataPhase") == "🔴 EN VIVO":
+                            targets.append(m.get("espnEventId") or m.get("id"))
+                            continue
+                        raw_dt = str(m.get("rawDate") or "")
+                        if raw_dt:
+                            try:
+                                dt_utc = datetime.datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
+                                mins_to_kickoff = (dt_utc - now_utc).total_seconds() / 60.0
+                                if -130.0 <= mins_to_kickoff <= 75.0:
+                                    targets.append(m.get("espnEventId") or m.get("id"))
+                            except Exception:
+                                pass
+                    for tid in targets[:12]:
+                        if tid:
+                            cls.get_or_refresh_match_lineups(str(tid), force_network=True)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_watcher_loop, daemon=True).start()
+

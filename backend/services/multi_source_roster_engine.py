@@ -65,9 +65,12 @@ class MultiSourceRosterEngine:
     _TEAM_BASE_ROSTER_CACHE: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
     # Semilla rápida de atletas extraídos directamente del scoreboard de ESPN: (league_code, team_id) -> athletes_list
     _SCOREBOARD_ATHLETES_SEED: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    # Caché de titulares recientes (últimos 2 partidos jugados en ESPN): (league_code, team_id) -> (timestamp, starters_list)
+    _RECENT_STARTERS_CACHE: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
 
     CACHE_TTL_SECONDS = 900  # 15 minutos en RAM
     BASE_ROSTER_TTL_SECONDS = 1800  # 30 minutos para plantillas base
+    RECENT_STARTERS_TTL_SECONDS = 3600  # 60 minutos para titulares de últimos 2 partidos
 
     # Modo de grilla ultra-rápida: evita llamadas HTTP secuenciales bloqueantes por partido
     _FAST_NON_BLOCKING_MODE = False
@@ -112,12 +115,24 @@ class MultiSourceRosterEngine:
                     name = ath.get("displayName") or ath.get("fullName") or ath.get("shortName")
                     if not name or norm_player_name(name) in seen_names:
                         continue
+                    injuries = ath.get("injuries") or []
+                    status_obj = ath.get("status")
+                    is_inactive = False
+                    if isinstance(status_obj, dict):
+                        st_type = str(status_obj.get("type") or status_obj.get("name") or "active").lower()
+                        if st_type not in ("active", "available", "probable", ""):
+                            is_inactive = True
+                    elif isinstance(status_obj, str) and status_obj.lower() not in ("active", "available", "probable", ""):
+                        is_inactive = True
+                    if injuries or is_inactive or ath.get("active") is False:
+                        continue
                     pos_abbr = ((ath.get("position") or {}).get("abbreviation") or "F").upper()
                     seen_names.add(norm_player_name(name))
                     existing.append({
                         "displayName": name,
                         "position": {"abbreviation": pos_abbr},
-                        "injuries": []
+                        "injuries": [],
+                        "isSeasonLeader": True
                     })
 
             for detail in (details_list or []):
@@ -148,11 +163,90 @@ class MultiSourceRosterEngine:
             cls._SCOREBOARD_ATHLETES_SEED[seed_key] = existing
 
     @classmethod
-    def _fetch_single_summary(cls, l_code: str, event_id: str, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
+    def _extract_recent_starters_from_summary(cls, l_code: str, sum_data: Dict[str, Any]):
+        """Guarda en caché los titulares de un resumen oficial de ESPN para alimentar el XI Probable."""
+        if not isinstance(sum_data, dict):
+            return
+        try:
+            for r_entry in (sum_data.get("rosters") or []):
+                r_team = r_entry.get("team") or {}
+                r_tid = str(r_team.get("id") or "")
+                if not r_tid:
+                    continue
+                starters = []
+                for item in (r_entry.get("roster") or []):
+                    is_st = (item.get("starter") is True) or (str(item.get("starter", "")).lower() == "true")
+                    if not is_st:
+                        continue
+                    ath = item.get("athlete") or {}
+                    name = ath.get("displayName") or ath.get("name")
+                    if not name:
+                        continue
+                    pos_obj = item.get("position") or {}
+                    pos_code = (pos_obj.get("abbreviation") or (ath.get("position") or {}).get("abbreviation") or "M").upper()
+                    starters.append({
+                        "displayName": name,
+                        "position": {"abbreviation": pos_code},
+                        "injuries": ath.get("injuries") or [],
+                        "isRecentStarter": True
+                    })
+                if len(starters) >= 8:
+                    key = (str(l_code), r_tid)
+                    prev = cls._RECENT_STARTERS_CACHE.get(key, (0.0, []))[1]
+                    seen = {norm_player_name(p.get("displayName", "")) for p in starters}
+                    merged = list(starters)
+                    for p in prev:
+                        n_p = norm_player_name(p.get("displayName", ""))
+                        if n_p and n_p not in seen:
+                            seen.add(n_p)
+                            merged.append(p)
+                    cls._RECENT_STARTERS_CACHE[key] = (time.time(), merged[:22])
+        except Exception:
+            pass
+
+    @classmethod
+    def _fetch_recent_team_starters(cls, l_code: str, t_id: str, timeout: float = 3.5) -> List[Dict[str, Any]]:
+        """
+        Obtiene los titulares de los últimos 2 partidos jugados por el club en ESPN
+        para alimentar la Fase A (XI Probable Inteligente).
+        """
+        if not l_code or not t_id:
+            return []
+        key = (str(l_code), str(t_id))
+        if key in cls._RECENT_STARTERS_CACHE:
+            ts, cached_st = cls._RECENT_STARTERS_CACHE[key]
+            if (time.time() - ts) < cls.RECENT_STARTERS_TTL_SECONDS and cached_st:
+                return cached_st
+        if cls._FAST_NON_BLOCKING_MODE:
+            return cls._RECENT_STARTERS_CACHE.get(key, (0.0, []))[1]
+
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/teams/{t_id}/schedule"
+        try:
+            res = _ROSTER_HTTP_SESSION.get(url, timeout=timeout)
+            if res.status_code == 200:
+                events = res.json().get("events") or []
+                completed_ids = []
+                for ev in events:
+                    st_state = ((ev.get("competitions") or [{}])[0].get("status") or {}).get("type", {}).get("state", "")
+                    if st_state == "post":
+                        eid = str(ev.get("id") or "")
+                        if eid.isdigit():
+                            completed_ids.append(eid)
+                last_two = completed_ids[-2:]
+                for eid in reversed(last_two):
+                    s_data = cls._fetch_single_summary(l_code, eid, timeout=timeout)
+                    if s_data:
+                        cls._extract_recent_starters_from_summary(l_code, s_data)
+        except Exception:
+            pass
+        return cls._RECENT_STARTERS_CACHE.get(key, (0.0, []))[1]
+
+    @classmethod
+    def _fetch_single_summary(cls, l_code: str, event_id: str, timeout: float = 5.0, force: bool = False) -> Optional[Dict[str, Any]]:
         if not l_code or not event_id:
             return None
         sum_cache_key = (str(l_code), str(event_id))
-        if sum_cache_key in cls._SUMMARY_CACHE:
+        if not force and sum_cache_key in cls._SUMMARY_CACHE:
             s_ts, s_cached = cls._SUMMARY_CACHE[sum_cache_key]
             if (time.time() - s_ts) < 45:
                 return s_cached
@@ -162,10 +256,35 @@ class MultiSourceRosterEngine:
             if res.status_code == 200:
                 data = res.json()
                 cls._SUMMARY_CACHE[sum_cache_key] = (time.time(), data)
+                cls._extract_recent_starters_from_summary(l_code, data)
+                # Si aparecen titulares confirmados (starter: true), invalidar caché previo de este event_id
+                rosters_node = data.get("rosters") or []
+                has_confirmed_starters = any(
+                    any((it.get("starter") is True) or (str(it.get("starter", "")).lower() == "true") for it in (r.get("roster") or []))
+                    for r in rosters_node if isinstance(r, dict)
+                )
+                if has_confirmed_starters:
+                    keys_to_inv = [k for k in list(cls._LIVE_ROSTERS_CACHE.keys()) if str(k[2]) == str(event_id)]
+                    for k in keys_to_inv:
+                        cached_entry = cls._LIVE_ROSTERS_CACHE.get(k)
+                        if cached_entry and not cached_entry[1].get("hasOfficialLineup"):
+                            cls._LIVE_ROSTERS_CACHE.pop(k, None)
                 return data
         except Exception:
             pass
         return None
+
+    @classmethod
+    def invalidate_event_lineup_cache(cls, event_id: str, league_code: str = ""):
+        """Invalida inmediatamente cualquier caché de alineaciones/goleadores asociado a un partido."""
+        eid_str = str(event_id or "").strip()
+        if not eid_str:
+            return
+        if league_code:
+            cls._SUMMARY_CACHE.pop((str(league_code), eid_str), None)
+        for k in list(cls._LIVE_ROSTERS_CACHE.keys()):
+            if str(k[2]) == eid_str:
+                cls._LIVE_ROSTERS_CACHE.pop(k, None)
 
     @classmethod
     def _fetch_single_team_roster(cls, l_code: str, t_id: str, timeout: float = 5.0) -> List[Dict[str, Any]]:
@@ -290,38 +409,51 @@ class MultiSourceRosterEngine:
         return (league_code or "sco.1", team_id or "", team_name)
 
     # ---------------------------------------------------------------------
-    # EXTRACCIÓN 100% EN VIVO DE PLANTILLAS DESDE ESPN
+    # EXTRACCIÓN 100% EN VIVO DE PLANTILLAS DESDE ESPN (MOTOR 2 FASES)
     # ---------------------------------------------------------------------
     @classmethod
     def get_live_roster(cls, team_name: str, league_code: str = "", team_id: str = "", event_id: str = "") -> Dict[str, Any]:
         """
-        Descarga y analiza en vivo la plantilla oficial actual desde la API de ESPN.
-        Usa caché multinivel y respeta `_FAST_NON_BLOCKING_MODE` durante el armado rápido de grilla.
+        Descarga y analiza en vivo la plantilla oficial actual desde la API de ESPN:
+        - Fase A (lineupStatus: 'probable'): Cruza titulares recientes (últimos 2 PJ) + líderes activos de temporada
+          + plantilla activa del club, descartando lesionados (`injuries`) e inactivos (`status != active`).
+        - Fase B (lineupStatus: 'official'): Cuando `summary.rosters` reporta jugadores con `starter === true`,
+          filtra estrictamente por `starter === true` e identifica suplentes destacados en `benchedStars`.
         """
         l_code, t_id, d_name = cls.resolve_team(team_name, league_code, team_id)
         cache_key = (str(l_code), str(t_id), str(event_id or ""))
 
-        ttl = 45 if event_id else cls.CACHE_TTL_SECONDS
+        real_event_id = str(event_id or "").strip()
+        sum_cache_key_check = (str(l_code), real_event_id)
+
+        # Si ya existe un summary en caché con alineación confirmada, verificar que el caché de roster no sea 'probable'
         if cache_key in cls._LIVE_ROSTERS_CACHE:
             ts, cached_roster = cls._LIVE_ROSTERS_CACHE[cache_key]
+            ttl = 45 if event_id else cls.CACHE_TTL_SECONDS
             if (time.time() - ts) < ttl:
-                return cached_roster
+                # Si el caché guardado era 'probable' pero ya llegó summary con rosters a _SUMMARY_CACHE, no usar el viejo
+                if not cached_roster.get("hasOfficialLineup") and sum_cache_key_check in cls._SUMMARY_CACHE:
+                    sum_cached_check = cls._SUMMARY_CACHE[sum_cache_key_check][1]
+                    if isinstance(sum_cached_check, dict) and (sum_cached_check.get("rosters") or []):
+                        cls._LIVE_ROSTERS_CACHE.pop(cache_key, None)
+                    else:
+                        return cached_roster
+                else:
+                    return cached_roster
 
-        # Si no hay event_id específico o si hay caché base sin event_id en modo rápido
+        # Si no hay event_id específico o si hay caché base sin event_id en modo rápido (y no hay summary para este evento)
         base_cache_key = (str(l_code), str(t_id), "")
         if cls._FAST_NON_BLOCKING_MODE and base_cache_key in cls._LIVE_ROSTERS_CACHE:
-            sum_cache_key_check = (str(l_code), str(event_id or "").strip())
             if sum_cache_key_check not in cls._SUMMARY_CACHE:
                 ts_b, cached_base = cls._LIVE_ROSTERS_CACHE[base_cache_key]
                 if (time.time() - ts_b) < cls.CACHE_TTL_SECONDS:
                     return cached_base
 
-        # 1. Si hay event_id, consultar summary oficial de ESPN (desde caché o red si no está en modo no-bloqueante)
+        # 1. Fase B: Si hay event_id, consultar summary oficial de ESPN
         has_official_lineup = False
         official_starters = []
         official_bench = []
 
-        real_event_id = str(event_id or "").strip()
         if real_event_id and not real_event_id.isdigit() and not cls._FAST_NON_BLOCKING_MODE:
             try:
                 sc_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/scoreboard"
@@ -346,8 +478,9 @@ class MultiSourceRosterEngine:
                     if (time.time() - s_ts) < 120:
                         sum_data = s_cached
                 if sum_data is None and not cls._FAST_NON_BLOCKING_MODE:
-                    sum_data = cls._fetch_single_summary(l_code, real_event_id, timeout=4.5)
+                    sum_data = cls._fetch_single_summary(l_code, real_event_id, timeout=4.0)
                 if isinstance(sum_data, dict):
+                    cls._extract_recent_starters_from_summary(l_code, sum_data)
                     for r_entry in sum_data.get("rosters", []):
                         r_team = r_entry.get("team", {})
                         r_team_id = str(r_team.get("id", ""))
@@ -384,16 +517,33 @@ class MultiSourceRosterEngine:
             except Exception as e:
                 logger.debug(f"Error fetching summary for event {real_event_id}: {e}")
 
-        # 2. Si no hay alineación oficial publicada aún, usar caché de plantilla base o semilla del scoreboard
+        # 2. Fase A (XI Probable Inteligente): Cruzar titulares recientes (últimos 2 PJ) + líderes activos + plantilla base
         raw_athletes = []
-        if not has_official_lineup and t_id:
+        recent_starters_list = []
+        season_leaders_list = []
+        if t_id:
             base_key = (str(l_code), str(t_id))
-            if base_key in cls._TEAM_BASE_ROSTER_CACHE:
-                raw_athletes = cls._TEAM_BASE_ROSTER_CACHE[base_key][1]
-            elif not cls._FAST_NON_BLOCKING_MODE:
-                raw_athletes = cls._fetch_single_team_roster(l_code, t_id, timeout=4.5)
-            if not raw_athletes and base_key in cls._SCOREBOARD_ATHLETES_SEED:
-                raw_athletes = cls._SCOREBOARD_ATHLETES_SEED[base_key]
+            season_leaders_list = list(cls._SCOREBOARD_ATHLETES_SEED.get(base_key, []))
+            if base_key in cls._RECENT_STARTERS_CACHE:
+                recent_starters_list = list(cls._RECENT_STARTERS_CACHE[base_key][1])
+            elif not has_official_lineup and not cls._FAST_NON_BLOCKING_MODE:
+                recent_starters_list = cls._fetch_recent_team_starters(l_code, t_id, timeout=3.0)
+
+            if not has_official_lineup:
+                if base_key in cls._TEAM_BASE_ROSTER_CACHE:
+                    raw_athletes = cls._TEAM_BASE_ROSTER_CACHE[base_key][1]
+                elif not cls._FAST_NON_BLOCKING_MODE:
+                    raw_athletes = cls._fetch_single_team_roster(l_code, t_id, timeout=4.0)
+
+                # Si raw_athletes está vacío o tiene menos de 5 jugadores, SIEMPRE descarga la plantilla oficial
+                # ejecutando cls._fetch_single_team_roster(l_code, t_id, timeout=3.5) aunque _FAST_NON_BLOCKING_MODE esté activo
+                if (not raw_athletes or len(raw_athletes) < 5) and l_code and t_id:
+                    fetched_roster = cls._fetch_single_team_roster(l_code, t_id, timeout=3.5)
+                    if fetched_roster:
+                        raw_athletes = fetched_roster
+
+                if not raw_athletes and season_leaders_list:
+                    raw_athletes = season_leaders_list
 
         # Clasificación estricta de atletas (CERO PORTEROS en ataque, y separación Titulares vs Banca)
         gks = []
@@ -403,8 +553,12 @@ class MultiSourceRosterEngine:
         bajas = []
         benched_star = None
         benched_notice = None
+        benched_star_names: List[str] = []
 
         if has_official_lineup:
+            # Invalidar cualquier entrada previa 'probable' de este partido
+            cls._LIVE_ROSTERS_CACHE.pop(cache_key, None)
+
             bench_norm_set = {norm_player_name(b["name"]) for b in official_bench}
             # 1. Extraer jugadores titulares confirmados en cancha (SOLO starter: true, jamás en official_bench)
             for st in official_starters:
@@ -439,9 +593,13 @@ class MultiSourceRosterEngine:
                 if name not in fws and name not in gks and name not in dfs:
                     fws.append(name)
 
-            # 4. Detectar figuras y atacantes que están en la banca (starter: false)
-            benched_star_names = []
+            # 4. Detectar figuras habituales, líderes de temporada o atacantes que hoy están en la banca (starter: false)
             priority_stars = ["jota", "høgh", "hogh", "forrest", "mheuka", "oxlade", "emenalo"]
+            habitual_norms = {
+                norm_player_name(a.get("displayName", ""))
+                for a in (season_leaders_list + recent_starters_list)
+                if a.get("displayName")
+            }
             for target in priority_stars:
                 for b in official_bench:
                     b_name = b["name"]
@@ -450,38 +608,80 @@ class MultiSourceRosterEngine:
             for b in official_bench:
                 b_name = b["name"]
                 b_pos = b.get("pos_code", "")
+                if norm_player_name(b_name) in habitual_norms and b_name not in benched_star_names and b_pos != "G":
+                    benched_star_names.append(b_name)
+            for b in official_bench:
+                b_name = b["name"]
+                b_pos = b.get("pos_code", "")
                 if any(c in b_pos for c in ["F", "ST", "CF", "W", "SUB"]) and b_name not in benched_star_names:
                     benched_star_names.append(b_name)
 
+            benched_star_names = benched_star_names[:3]
             benched_star = ", ".join(benched_star_names[:2]) if benched_star_names else None
             benched_notice = (
-                f"🪑 EN BANCA HOY: {', '.join(benched_star_names[:2])} (Suplentes - Herencia de penales activada en titulares)"
+                f"🪑 Banca hoy: {', '.join(benched_star_names[:2])} (Reemplazados por titulares en cancha)"
                 if benched_star_names
                 else None
             )
 
         else:
-            # Modo Previa: Clasificar atletas de la plantilla general de ESPN
+            # Fase A - XI Probable Inteligente:
+            # 1) Primero detectar todos los jugadores lesionados (`injuries`) o con estado inactivo (`status != active`)
+            unavailable_norms = set()
             for a in raw_athletes:
+                if not isinstance(a, dict):
+                    continue
                 name = a.get("displayName") or a.get("name")
                 if not name:
                     continue
-                pos_code = a.get("position", {}).get("abbreviation", "M").upper()
-                injuries = a.get("injuries", [])
+                pos_code = (a.get("position", {}) or {}).get("abbreviation", "M").upper()
+                injuries = a.get("injuries") or []
+                status_obj = a.get("status")
+                is_inactive = False
+                if isinstance(status_obj, dict):
+                    st_type = str(status_obj.get("type") or status_obj.get("name") or "active").lower()
+                    if st_type not in ("active", "available", "probable", ""):
+                        is_inactive = True
+                elif isinstance(status_obj, str) and status_obj.lower() not in ("active", "available", "probable", ""):
+                    is_inactive = True
+                if a.get("active") is False:
+                    is_inactive = True
 
-                if injuries:
-                    inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
-                    detail = inj.get("details", {}).get("type") if isinstance(inj, dict) else "Baja médica reportada"
-                    bajas.append({
-                        "name": name,
-                        "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
-                        "type": "LESIÓN",
-                        "badge": "❌ Baja por Lesión",
-                        "reason": detail or "Lesión en evaluación médica oficial",
-                        "expectedReturn": "En recuperación"
-                    })
-                    continue
+                if injuries or is_inactive:
+                    unavailable_norms.add(norm_player_name(name))
+                    if injuries:
+                        inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
+                        detail = inj.get("details", {}).get("type") if isinstance(inj, dict) else "Baja médica reportada"
+                        bajas.append({
+                            "name": name,
+                            "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
+                            "type": "LESIÓN",
+                            "badge": "❌ Baja por Lesión",
+                            "reason": detail or "Lesión en evaluación médica oficial",
+                            "expectedReturn": "En recuperación"
+                        })
 
+            # 2) Cruzar en orden de prioridad: Líderes activos de temporada + Titulares recientes (últimos 2 PJ) + Plantilla activa
+            combined_candidates = []
+            seen_cand_norms = set()
+            for source_list in (season_leaders_list, recent_starters_list, raw_athletes):
+                for a in (source_list or []):
+                    if not isinstance(a, dict):
+                        continue
+                    name = a.get("displayName") or a.get("name")
+                    if not name:
+                        continue
+                    n_norm = norm_player_name(name)
+                    if not n_norm or n_norm in unavailable_norms or n_norm in seen_cand_norms:
+                        continue
+                    if a.get("injuries"):
+                        continue
+                    seen_cand_norms.add(n_norm)
+                    combined_candidates.append(a)
+
+            for a in combined_candidates:
+                name = a.get("displayName") or a.get("name")
+                pos_code = (a.get("position", {}) or {}).get("abbreviation", "M").upper()
                 if pos_code == "G" or "GK" in pos_code:
                     if name not in gks:
                         gks.append(name)
@@ -496,15 +696,49 @@ class MultiSourceRosterEngine:
                     if name not in mfs:
                         mfs.append(name)
 
+        lineup_status_code = "official" if has_official_lineup else "probable"
+
         # Portero Titular y Suplente Oficiales
         active_gk = gks[0] if gks else f"Portero Titular de {team_name}"
         backup_gk = official_bench[0]["name"] if (has_official_lineup and official_bench) else (gks[1] if len(gks) > 1 else active_gk)
 
-        # Goleadores Reales (100% Forwards y Midfielders atacantes, CERO PORTEROS, 100% Titulares si hay alineación)
-        scorers = []
-        p1 = fws[0] if len(fws) > 0 else (mfs[0] if len(mfs) > 0 else f"Delantero de {team_name}")
-        p2 = fws[1] if len(fws) > 1 else (mfs[0] if (len(fws) <= 1 and len(mfs) > 0 and mfs[0] != p1) else (mfs[1] if len(mfs) > 1 else f"Extremo de {team_name}"))
-        p3 = fws[2] if len(fws) > 2 else (mfs[1] if (len(mfs) > 1 and mfs[1] not in [p1, p2]) else (mfs[0] if (len(mfs) > 0 and mfs[0] not in [p1, p2]) else f"Mediocampista de {team_name}"))
+        # Respaldo de futbolistas reales del plantel para evitar cadenas genéricas
+        real_season_fws = [a.get("displayName") or a.get("name") for a in raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["F", "ST", "CF", "W"])]
+        real_season_mfs = [a.get("displayName") or a.get("name") for a in raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["M", "AM", "CM", "LM", "RM", "DM"])]
+        real_season_dfs = [a.get("displayName") or a.get("name") for a in raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["D", "CB", "LB", "RB", "WB"])]
+        real_all_outfield = [
+            a.get("displayName") or a.get("name")
+            for a in raw_athletes
+            if isinstance(a, dict) and (a.get("displayName") or a.get("name")) and not ((a.get("position", {}) or {}).get("abbreviation", "")).upper().startswith("G")
+        ]
+
+        def _pick_real_player(candidates: list, pool1: list, pool2: list, pool3: list, used: set, fallback_prefix: str) -> str:
+            for p in candidates:
+                if p and p not in used:
+                    used.add(p)
+                    return p
+            for p in pool1:
+                if p and p not in used:
+                    used.add(p)
+                    return p
+            for p in pool2:
+                if p and p not in used:
+                    used.add(p)
+                    return p
+            for p in pool3:
+                if p and p not in used:
+                    used.add(p)
+                    return p
+            # Si no hay más jugadores únicos en el plantel
+            for p in (candidates + pool1 + pool2 + pool3):
+                if p:
+                    return p
+            return f"{fallback_prefix} de {team_name}"
+
+        used_scorers = set()
+        p1 = _pick_real_player(fws, mfs, real_season_fws, real_all_outfield, used_scorers, "Atacante Titular")
+        p2 = _pick_real_player(fws, mfs, real_season_fws, real_all_outfield, used_scorers, "Segundo Atacante")
+        p3 = _pick_real_player(mfs, fws, real_season_mfs, real_all_outfield, used_scorers, "Mediocampista Ofensivo")
 
         p1_inherited = bool(benched_star)
         p1_role = f"Pateador N°1 Titular de {team_name} (Hereda Penales)" if p1_inherited else f"Pateador N°1 de {team_name} (Penales)"
@@ -521,8 +755,10 @@ class MultiSourceRosterEngine:
             "baseOdds": 2.30,
             "inherited": p1_inherited,
             "inheritanceNotice": p1_notice,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": has_official_lineup,
+            "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
 
@@ -537,8 +773,10 @@ class MultiSourceRosterEngine:
             "baseOdds": 2.75,
             "inherited": False,
             "inheritanceNotice": None,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": has_official_lineup,
+            "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
 
@@ -553,14 +791,17 @@ class MultiSourceRosterEngine:
             "baseOdds": 3.60,
             "inherited": False,
             "inheritanceNotice": None,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": has_official_lineup,
+            "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
 
         # Tarjetas / Disciplina Reales (100% Defenders y Midfielders de contención, CERO PORTEROS)
         cards = []
-        c1 = dfs[0] if dfs else "Defensa Central"
+        used_card_players = set()
+        c1 = _pick_real_player(dfs, mfs, real_season_dfs, real_all_outfield, used_card_players, "Defensa Central")
         cards.append({
             "name": c1,
             "role": f"Zaguero Central de {team_name}",
@@ -570,11 +811,13 @@ class MultiSourceRosterEngine:
             "alert": "⚡ Advertencia: Faltas tácticas en corte directo",
             "baseOdds": 2.35,
             "prob": 70,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": has_official_lineup,
+            "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
-        c2 = dfs[1] if len(dfs) > 1 else (dfs[0] if dfs else "Marcador de Banda")
+        c2 = _pick_real_player(dfs, mfs, real_season_dfs, real_all_outfield, used_card_players, "Marcador de Banda")
         cards.append({
             "name": c2,
             "role": f"Marcador de Banda de {team_name}",
@@ -584,11 +827,13 @@ class MultiSourceRosterEngine:
             "alert": "⚠️ Duelo por velocidad en repliegue",
             "baseOdds": 2.60,
             "prob": 64,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": has_official_lineup,
+            "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
-        c3 = mfs[1] if len(mfs) > 1 else (dfs[2] if len(dfs) > 2 else (mfs[0] if mfs else "Volante de Contención"))
+        c3 = _pick_real_player(mfs, dfs, real_season_mfs, real_all_outfield, used_card_players, "Volante de Contención")
         cards.append({
             "name": c3,
             "role": f"Pivote de Recuperación de {team_name}",
@@ -598,8 +843,10 @@ class MultiSourceRosterEngine:
             "alert": "⚠️ Fricción en zona de recuperación",
             "baseOdds": 2.75,
             "prob": 58,
+            "starter": True,
             "isStarter": True,
             "isOfficialStarter": has_official_lineup,
+            "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
 
@@ -607,6 +854,7 @@ class MultiSourceRosterEngine:
             "club": team_name,
             "teamId": t_id,
             "leagueCode": l_code,
+            "lineupStatus": lineup_status_code,
             "hasOfficialLineup": has_official_lineup,
             "activeGoalkeeper": active_gk,
             "backupGoalkeeper": backup_gk,
@@ -616,6 +864,7 @@ class MultiSourceRosterEngine:
             "forwards": fws,
             "officialStarters": [s["name"] for s in official_starters],
             "officialBench": [b["name"] for b in official_bench],
+            "benchedStars": benched_star_names,
             "benchedStar": benched_star,
             "benchedStarNotice": benched_notice,
             "scorers": scorers,
