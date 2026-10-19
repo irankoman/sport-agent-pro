@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-turbo_speed_v13';
+const CACHE_NAME = 'sport-agent-v-clean_rosters_v16';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=turbo_speed_v13',
+  '/app.js?v=clean_rosters_v16',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'

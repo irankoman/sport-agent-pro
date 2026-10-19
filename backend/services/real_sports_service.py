@@ -785,6 +785,110 @@ class RealSportsService:
                 roster_targets=roster_targets,
                 timeout=5.0
             )
+            # Recalcular y guardar en cache_matches.json en cuanto finalice la descarga en segundo plano
+            matches = cls.get_cached_matches_list()
+            if matches:
+                updated_count = 0
+                for match_obj in matches:
+                    if not isinstance(match_obj, dict):
+                        continue
+                    ev_id = str(match_obj.get("id") or "")
+                    espn_eid = str(match_obj.get("espnEventId") or "")
+                    lookup_eid = espn_eid or ev_id
+                    home_name = str(match_obj.get("homeTeam") or "Local")
+                    away_name = str(match_obj.get("awayTeam") or "Visita")
+                    home_tid = str(match_obj.get("homeTeamId") or "")
+                    away_tid = str(match_obj.get("awayTeamId") or "")
+                    l_code = str(match_obj.get("espnLeagueCode") or "")
+
+                    home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, lookup_eid, league_code=l_code, team_id=home_tid)
+                    away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, lookup_eid, league_code=l_code, team_id=away_tid)
+                    home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, lookup_eid, league_code=l_code, team_id=home_tid)
+                    home_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(home_name, lookup_eid, league_code=l_code, team_id=home_tid)
+                    away_avail_scorers = MultiSourceRosterEngine.get_available_scorers(away_name, lookup_eid, league_code=l_code, team_id=away_tid)
+                    away_avail_cards = MultiSourceRosterEngine.get_available_card_candidates(away_name, lookup_eid, league_code=l_code, team_id=away_tid)
+
+                    h_sc = home_avail_scorers[0] if home_avail_scorers else {"name": home_name, "fit": 95}
+                    h_card = home_avail_cards[0] if home_avail_cards else {"name": home_name, "fit": 92}
+                    a_sc = away_avail_scorers[0] if away_avail_scorers else {"name": away_name, "fit": 94}
+                    a_card = away_avail_cards[0] if away_avail_cards else {"name": away_name, "fit": 90}
+
+                    # Actualizar teamStatus
+                    if isinstance(match_obj.get("teamStatus"), dict):
+                        if isinstance(match_obj["teamStatus"].get("home"), dict):
+                            match_obj["teamStatus"]["home"]["players"] = [
+                                { "name": h_sc["name"], "role": "Titular (90m)", "fit": h_sc.get("fit", 97), "note": f"Pateador ofensivo de {home_name} en Betano" },
+                                { "name": h_card["name"], "role": "Titular (90m)", "fit": h_card.get("fit", 94), "note": f"Zaguero titular; riesgo de amonestación táctica" }
+                            ]
+                            match_obj["teamStatus"]["home"]["bajas"] = home_bajas
+                        if isinstance(match_obj["teamStatus"].get("away"), dict):
+                            match_obj["teamStatus"]["away"]["players"] = [
+                                { "name": a_sc["name"], "role": "Titular (90m)", "fit": a_sc.get("fit", 95), "note": f"Referente ofensivo de {away_name} en Betano" },
+                                { "name": a_card["name"], "role": "Titular (90m)", "fit": a_card.get("fit", 91), "note": f"Marcador de choque; propenso a amonestación" }
+                            ]
+                            match_obj["teamStatus"]["away"]["bajas"] = away_bajas
+
+                    # Recalcular analítica de jugadores para refrescar nombres reales
+                    ref_obj = match_obj.get("referee") or {}
+                    ref_name_raw = str(ref_obj.get("name") or "Árbitro Oficial").split(" (")[0]
+                    ref_yellows = float(ref_obj.get("avgYellows") or 4.2)
+                    odds_det = match_obj.get("oddsDetails") or {}
+                    unified_odds = match_obj.get("unifiedOdds") or {}
+                    odds_input = {
+                        "unifiedOdds": unified_odds,
+                        "home_win_odds": odds_det.get("homeWin", 1.85),
+                        "away_win_odds": odds_det.get("awayWin", 3.80),
+                        "pre_home_win_odds": odds_det.get("preHomeWin", odds_det.get("homeWin", 1.85)),
+                        "pre_away_win_odds": odds_det.get("preAwayWin", odds_det.get("awayWin", 3.80)),
+                        "lambda_home": unified_odds.get("lambda_home", 1.45),
+                        "lambda_away": unified_odds.get("lambda_away", 1.15)
+                    }
+
+                    is_official = bool(match_obj.get("isLive") or match_obj.get("isFinished"))
+                    new_analytics = PlayerPropsEngine.build_player_analytics(
+                        fixture_id=lookup_eid,
+                        home_name=home_name,
+                        away_name=away_name,
+                        referee_name=ref_name_raw,
+                        referee_yellows=ref_yellows,
+                        is_official_confirmed=is_official,
+                        league_code=l_code,
+                        home_team_id=home_tid,
+                        away_team_id=away_tid,
+                        odds_data=odds_input
+                    )
+                    lineup_status = new_analytics.get("lineupStatus") or ("official" if new_analytics.get("hasOfficialLineup") else "probable")
+                    benched_stars = new_analytics.get("benchedStars") or []
+                    has_any_bajas = bool(home_bajas or away_bajas)
+                    if lineup_status == "official":
+                        h_compact = "🟢 XI Oficial · Mixto" if home_bajas else "🟢 XI Oficial · Titular"
+                        a_compact = "🟢 XI Oficial · Mixto" if away_bajas else "🟢 XI Oficial · Titular"
+                        compact_badge = "🟢 XI Oficial · Mixto" if has_any_bajas else "🟢 XI Oficial · Titular"
+                    else:
+                        h_compact = "🟡 XI Probable · Mixto" if home_bajas else "🟡 XI Probable · Titular"
+                        a_compact = "🟡 XI Probable · Mixto" if away_bajas else "🟡 XI Probable · Titular"
+                        compact_badge = "🟡 XI Probable · Mixto" if has_any_bajas else "🟡 XI Probable · Titular"
+
+                    match_obj["lineupStatus"] = lineup_status
+                    match_obj["benchedStars"] = benched_stars
+                    match_obj["lineupSummary"] = {
+                        "status": lineup_status,
+                        "compactBadge": compact_badge,
+                        "homeCompact": h_compact,
+                        "awayCompact": a_compact,
+                        "homeType": h_compact,
+                        "homeBadge": "green" if (lineup_status == "official" and not home_bajas) else "amber",
+                        "awayType": a_compact,
+                        "awayBadge": "green" if (lineup_status == "official" and not away_bajas) else "amber"
+                    }
+                    match_obj["bajas"] = {"home": home_bajas, "away": away_bajas}
+                    match_obj["playerAnalytics"] = new_analytics
+                    match_obj["betanoLevel2"] = cls._build_level2_picks_from_analytics(new_analytics)
+                    updated_count += 1
+
+                cls._cached_matches = matches
+                cls._save_disk_cache(matches)
+                logging.info(f"Warmed rosters and updated {updated_count} matches in cache_matches.json")
         except Exception as e:
             logging.debug(f"Background roster warming error: {e}")
         finally:

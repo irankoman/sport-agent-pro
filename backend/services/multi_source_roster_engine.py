@@ -744,6 +744,7 @@ class MultiSourceRosterEngine:
         p1_role = f"Pateador N°1 Titular de {team_name} (Hereda Penales)" if p1_inherited else f"Pateador N°1 de {team_name} (Penales)"
         p1_notice = f"🔥 VALOR DETECTADO: {p1} asume la referencia ofensiva ante la suplencia hoy de {benched_star}" if p1_inherited else None
 
+        scorers = []
         scorers.append({
             "name": p1,
             "role": p1_role,
