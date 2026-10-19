@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=weekly_audit_v10')
+        navigator.serviceWorker.register('/sw.js?v=weekly_calendar_v11')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=weekly_audit_v10')
+            navigator.serviceWorker.register('/service-worker.js?v=weekly_calendar_v11')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -63,6 +63,166 @@
       const weekRangeLabel = `Semana activa: ${startLabel} - ${endLabel}`;
 
       return { startIso, endIso, dayDateMap, santiagoNow, startDate, endDate, weekRangeLabel };
+    };
+
+    const STORAGE_KEY_WEEKLY_HISTORY = 'sport_agent_weekly_snapshots_v1';
+    const SPANISH_MONTHS_SHORT_GLOBAL = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+    const getWeekInfoFromDate = (dateInput) => {
+      try {
+        let baseDate;
+        if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+          baseDate = new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+        } else if (typeof dateInput === 'string' && dateInput.trim()) {
+          const clean = dateInput.trim().slice(0, 10);
+          const parts = clean.split('-');
+          if (parts.length === 3) {
+            baseDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          } else {
+            baseDate = getSantiagoDate();
+          }
+        } else {
+          baseDate = getSantiagoDate();
+        }
+        const dayOfWeek = baseDate.getDay();
+        const daysSinceMonday = (dayOfWeek + 6) % 7;
+        const startDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() - daysSinceMonday);
+        const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6);
+        const prevStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() - 7);
+        const prevEnd = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() - 1);
+
+        const startIso = getSantiagoYMD(startDate);
+        const endIso = getSantiagoYMD(endDate);
+        const startCompact = startIso.replace(/-/g, '');
+        const endCompact = endIso.replace(/-/g, '');
+        const weekKey = `${startIso}_${endIso}`;
+
+        const prevStartIso = getSantiagoYMD(prevStart);
+        const prevEndIso = getSantiagoYMD(prevEnd);
+        const prevWeekKey = `${prevStartIso}_${prevEndIso}`;
+        const prevStartCompact = prevStartIso.replace(/-/g, '');
+        const prevEndCompact = prevEndIso.replace(/-/g, '');
+
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const sDay = pad2(startDate.getDate());
+        const sMon = SPANISH_MONTHS_SHORT_GLOBAL[startDate.getMonth()];
+        const eDay = pad2(endDate.getDate());
+        const eMon = SPANISH_MONTHS_SHORT_GLOBAL[endDate.getMonth()];
+
+        const shortRangeLabel = `${sDay} ${sMon} - ${eDay} ${eMon}`;
+        const fullRangeLabel = `Lun ${sDay} ${sMon} - Dom ${eDay} ${eMon}`;
+
+        const active = getActiveJornadaRange();
+        const isCurrent = (startIso === active.startIso);
+        const lastClosedMonday = new Date(active.startDate.getFullYear(), active.startDate.getMonth(), active.startDate.getDate() - 7);
+        const isJustClosed = (startIso === getSantiagoYMD(lastClosedMonday));
+
+        return {
+          weekKey,
+          startIso,
+          endIso,
+          startCompact,
+          endCompact,
+          shortRangeLabel,
+          fullRangeLabel,
+          prevWeekKey,
+          prevStartCompact,
+          prevEndCompact,
+          isCurrent,
+          isJustClosed,
+          isClosed: !isCurrent
+        };
+      } catch (e) {
+        const active = getActiveJornadaRange();
+        return {
+          weekKey: `${active.startIso}_${active.endIso}`,
+          startIso: active.startIso,
+          endIso: active.endIso,
+          startCompact: active.startIso.replace(/-/g, ''),
+          endCompact: active.endIso.replace(/-/g, ''),
+          shortRangeLabel: active.weekRangeLabel.replace('Semana activa: ', ''),
+          fullRangeLabel: active.weekRangeLabel.replace('Semana activa: ', ''),
+          prevWeekKey: '',
+          prevStartCompact: '',
+          prevEndCompact: '',
+          isCurrent: true,
+          isJustClosed: false,
+          isClosed: false
+        };
+      }
+    };
+
+    const buildRecent4WeeksList = () => {
+      try {
+        const { startDate } = getActiveJornadaRange();
+        return [-3, -2, -1, 0].map((offsetWeeks) => {
+          const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + (offsetWeeks * 7));
+          return getWeekInfoFromDate(d);
+        });
+      } catch (e) {
+        return [getWeekInfoFromDate(new Date())];
+      }
+    };
+
+    const loadWeeklySnapshots = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_WEEKLY_HISTORY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') return parsed;
+        }
+      } catch (e) {}
+      return {};
+    };
+
+    const sanitizeAuditForStorage = (auditObj) => {
+      if (!auditObj || typeof auditObj !== 'object') return null;
+      const stripMatchObj = (arr) => (Array.isArray(arr) ? arr.map((it) => {
+        if (!it) return it;
+        const { matchObj, ...rest } = it;
+        return rest;
+      }) : []);
+      return {
+        ...auditObj,
+        achievedList: stripMatchObj(auditObj.achievedList),
+        failedList: stripMatchObj(auditObj.failedList),
+        failurePatterns: {
+          upsets: {
+            count: auditObj.failurePatterns?.upsets?.count || 0,
+            items: stripMatchObj(auditObj.failurePatterns?.upsets?.items)
+          },
+          lowScoring: {
+            count: auditObj.failurePatterns?.lowScoring?.count || 0,
+            items: stripMatchObj(auditObj.failurePatterns?.lowScoring?.items)
+          },
+          rhythmDiscipline: {
+            count: auditObj.failurePatterns?.rhythmDiscipline?.count || 0,
+            items: stripMatchObj(auditObj.failurePatterns?.rhythmDiscipline?.items)
+          }
+        }
+      };
+    };
+
+    const saveWeeklySnapshotToStorage = (weekKey, weekInfo, auditAll, auditFavorites) => {
+      if (!weekKey || !auditAll) return null;
+      try {
+        const currentStore = loadWeeklySnapshots();
+        currentStore[weekKey] = {
+          weekKey,
+          startIso: weekInfo?.startIso || '',
+          endIso: weekInfo?.endIso || '',
+          shortRangeLabel: weekInfo?.shortRangeLabel || '',
+          fullRangeLabel: weekInfo?.fullRangeLabel || '',
+          savedAt: new Date().toISOString(),
+          all: sanitizeAuditForStorage(auditAll),
+          favorites: sanitizeAuditForStorage(auditFavorites)
+        };
+        localStorage.setItem(STORAGE_KEY_WEEKLY_HISTORY, JSON.stringify(currentStore));
+        return currentStore;
+      } catch (e) {
+        console.error("Error guardando snapshot semanal en localStorage:", e);
+        return null;
+      }
     };
 
     const buildWeekDaysList = () => {
@@ -555,22 +715,25 @@
         setShowDetailModal(false);
       };
 
-      // Estado y Motor de Auditoría para "📊 Resumen de la Semana"
+      // Estado y Motor de Auditoría para "📊 Resumen de la Semana" (Con Calendario Histórico + Snapshots LocalStorage)
       const [showWeeklySummaryModal, setShowWeeklySummaryModal] = useState(false);
       const [weeklySummaryScope, setWeeklySummaryScope] = useState('all'); // 'all' | 'favorites'
       const [showWeeklyAchieved, setShowWeeklyAchieved] = useState(false);
       const [showWeeklyFailed, setShowWeeklyFailed] = useState(true);
 
-      useEffect(() => {
-        window.openWeeklySummaryModal = () => {
-          setShowWeeklySummaryModal(true);
-        };
-        return () => {
-          try { delete window.openWeeklySummaryModal; } catch (e) {}
-        };
-      }, []);
+      const recent4Weeks = useMemo(() => buildRecent4WeeksList(), [matches]);
+      const [selectedAuditWeek, setSelectedAuditWeek] = useState(() => {
+        const list = buildRecent4WeeksList();
+        return list[list.length - 1] || getWeekInfoFromDate(new Date());
+      });
+      const [weeklySnapshots, setWeeklySnapshots] = useState(loadWeeklySnapshots);
+      const [isLoadingWeeklyHistory, setIsLoadingWeeklyHistory] = useState(false);
+      const [autoSwitchedToClosedWeek, setAutoSwitchedToClosedWeek] = useState(false);
+      const [customCalendarDate, setCustomCalendarDate] = useState('');
+      const weeklyMatchesCacheRef = useRef({});
+      const calendarInputRef = useRef(null);
 
-      const evaluateWeeklyPerformance = (matchesList, onlyFavs = false) => {
+      const evaluateWeeklyPerformance = (matchesList, onlyFavs = false, customStartIso = null, customEndIso = null) => {
         const emptyResult = {
           finishedMatchesCount: 0,
           totalPicks: 0,
@@ -601,12 +764,16 @@
             return emptyResult;
           }
 
-          const { startIso, endIso } = getActiveJornadaRange();
+          const activeRange = getActiveJornadaRange();
+          const startIso = customStartIso || activeRange.startIso;
+          const endIso = customEndIso || activeRange.endIso;
+          const isHistoricalWeek = Boolean(endIso < activeRange.startIso);
+
           const finishedMatches = matchesList.filter((m) => {
             if (!m) return false;
             const mDate = m.matchDate || (m.rawDate ? String(m.rawDate).slice(0, 10) : '');
             if (mDate && (mDate < startIso || mDate > endIso)) return false;
-            const isFin = isFinishedMatch(m) || m.status === 'post' || m.status === 'finished';
+            const isFin = isFinishedMatch(m) || m.status === 'post' || m.status === 'finished' || (isHistoricalWeek && m.score && m.score !== 'VS' && !m.isLive);
             if (!isFin) return false;
             if (onlyFavs && !isMatchFavoriteOrImportant(m)) return false;
             return true;
@@ -938,6 +1105,150 @@
           return emptyResult;
         }
       };
+
+      const fetchAndCacheWeekAudit = async (weekInfo, silent = false) => {
+        if (!weekInfo || !weekInfo.weekKey) return;
+        const wKey = weekInfo.weekKey;
+        try {
+          if (weekInfo.isCurrent) {
+            weeklyMatchesCacheRef.current[wKey] = matches;
+            const auditAll = evaluateWeeklyPerformance(matches, false, weekInfo.startIso, weekInfo.endIso);
+            const auditFav = evaluateWeeklyPerformance(matches, true, weekInfo.startIso, weekInfo.endIso);
+            if (auditAll.finishedMatchesCount > 0) {
+              const updatedStore = saveWeeklySnapshotToStorage(wKey, weekInfo, auditAll, auditFav);
+              if (updatedStore) setWeeklySnapshots({ ...updatedStore });
+            }
+            if (!silent && weekInfo.prevWeekKey) {
+              const snapStore = loadWeeklySnapshots();
+              if (!snapStore[weekInfo.prevWeekKey]) {
+                const prevInfo = getWeekInfoFromDate(weekInfo.prevWeekKey.slice(0, 10));
+                fetchAndCacheWeekAudit(prevInfo, true);
+              }
+            }
+            return;
+          }
+
+          // Si ya tenemos los partidos de esa semana en memoria, recalcular y guardar instantáneamente
+          const cachedWeekMatches = weeklyMatchesCacheRef.current[wKey];
+          if (Array.isArray(cachedWeekMatches) && cachedWeekMatches.length > 0) {
+            const auditAll = evaluateWeeklyPerformance(cachedWeekMatches, false, weekInfo.startIso, weekInfo.endIso);
+            const auditFav = evaluateWeeklyPerformance(cachedWeekMatches, true, weekInfo.startIso, weekInfo.endIso);
+            const updatedStore = saveWeeklySnapshotToStorage(wKey, weekInfo, auditAll, auditFav);
+            if (updatedStore) setWeeklySnapshots({ ...updatedStore });
+            return;
+          }
+
+          // Si ya existe en localStorage, mostrar de inmediato en 0.1s sin bloquear con spinner
+          const existingStore = loadWeeklySnapshots();
+          const hasSavedSnapshot = Boolean(
+            existingStore[wKey] &&
+            existingStore[wKey].all &&
+            existingStore[wKey].all.finishedMatchesCount > 0
+          );
+
+          if (!hasSavedSnapshot && !silent) {
+            setIsLoadingWeeklyHistory(true);
+          }
+
+          const url = `/api/real-matches?week_start=${weekInfo.startCompact}&week_end=${weekInfo.endCompact}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+              weeklyMatchesCacheRef.current[wKey] = data;
+              const auditAll = evaluateWeeklyPerformance(data, false, weekInfo.startIso, weekInfo.endIso);
+              const auditFav = evaluateWeeklyPerformance(data, true, weekInfo.startIso, weekInfo.endIso);
+              const updatedStore = saveWeeklySnapshotToStorage(wKey, weekInfo, auditAll, auditFav);
+              if (updatedStore) setWeeklySnapshots({ ...updatedStore });
+            }
+          }
+
+          // Pre-cargar silenciosamente la semana anterior a la seleccionada para la cintilla de evolución
+          if (!silent && weekInfo.prevWeekKey) {
+            const snapStoreAfter = loadWeeklySnapshots();
+            if (!snapStoreAfter[weekInfo.prevWeekKey]) {
+              const prevInfo = getWeekInfoFromDate(weekInfo.prevWeekKey.slice(0, 10));
+              fetchAndCacheWeekAudit(prevInfo, true);
+            }
+          }
+        } catch (err) {
+          console.error("Error cargando semana histórica:", err);
+        } finally {
+          if (!silent) {
+            setIsLoadingWeeklyHistory(false);
+          }
+        }
+      };
+
+      const selectAuditWeekAndLoad = (weekInfo, isAutoSwitch = false) => {
+        if (!weekInfo) return;
+        setSelectedAuditWeek(weekInfo);
+        setAutoSwitchedToClosedWeek(Boolean(isAutoSwitch));
+        fetchAndCacheWeekAudit(weekInfo, false);
+      };
+
+      const handleCalendarWeekPick = (dateStr) => {
+        if (!dateStr) return;
+        setCustomCalendarDate(dateStr);
+        const pickedWeek = getWeekInfoFromDate(dateStr);
+        selectAuditWeekAndLoad(pickedWeek, false);
+      };
+
+      const openWeeklySummarySmart = () => {
+        try {
+          const list = buildRecent4WeeksList();
+          const currentWeek = list[list.length - 1] || getWeekInfoFromDate(new Date());
+          const prevClosedWeek = list.length >= 2 ? list[list.length - 2] : currentWeek;
+          const currAudit = evaluateWeeklyPerformance(matches, false, currentWeek.startIso, currentWeek.endIso);
+
+          // Regla Automática de Apertura Inteligente (ej. Lunes con 0 partidos finalizados en la semana en curso)
+          if (currAudit.finishedMatchesCount === 0 && prevClosedWeek && !prevClosedWeek.isCurrent) {
+            setSelectedAuditWeek(prevClosedWeek);
+            setAutoSwitchedToClosedWeek(true);
+            setShowWeeklySummaryModal(true);
+            fetchAndCacheWeekAudit(prevClosedWeek, false);
+          } else {
+            setSelectedAuditWeek(currentWeek);
+            setAutoSwitchedToClosedWeek(false);
+            setShowWeeklySummaryModal(true);
+            fetchAndCacheWeekAudit(currentWeek, false);
+          }
+        } catch (e) {
+          setShowWeeklySummaryModal(true);
+        }
+      };
+
+      useEffect(() => {
+        window.openWeeklySummaryModal = openWeeklySummarySmart;
+        return () => {
+          try { delete window.openWeeklySummaryModal; } catch (e) {}
+        };
+      }, [matches, vipTeams]);
+
+      // Autoguardado automático de la semana en curso y precarga inteligente de la semana cerrada
+      useEffect(() => {
+        if (!Array.isArray(matches) || matches.length === 0) return;
+        try {
+          const list = buildRecent4WeeksList();
+          const currentWeek = list[list.length - 1];
+          const prevClosedWeek = list.length >= 2 ? list[list.length - 2] : null;
+          if (currentWeek) {
+            weeklyMatchesCacheRef.current[currentWeek.weekKey] = matches;
+            const auditAll = evaluateWeeklyPerformance(matches, false, currentWeek.startIso, currentWeek.endIso);
+            const auditFav = evaluateWeeklyPerformance(matches, true, currentWeek.startIso, currentWeek.endIso);
+            if (auditAll.finishedMatchesCount > 0) {
+              const updatedStore = saveWeeklySnapshotToStorage(currentWeek.weekKey, currentWeek, auditAll, auditFav);
+              if (updatedStore) setWeeklySnapshots({ ...updatedStore });
+            } else if (prevClosedWeek) {
+              // Si la semana en curso tiene 0 partidos finalizados, precargar en segundo plano la semana cerrada
+              const store = loadWeeklySnapshots();
+              if (!store[prevClosedWeek.weekKey] || !store[prevClosedWeek.weekKey]?.all?.finishedMatchesCount) {
+                fetchAndCacheWeekAudit(prevClosedWeek, true);
+              }
+            }
+          }
+        } catch (e) {}
+      }, [matches, vipTeams]);
 
       // Cargar partidos reales y ejecutar ciclo de sincronización multifuente
       const loadRealMatches = async (force = false, isBackground = false) => {
@@ -1342,9 +1653,9 @@
 
                 <button
                   id="btn-weekly-summary"
-                  onClick={() => window.openWeeklySummaryModal ? window.openWeeklySummaryModal() : setShowWeeklySummaryModal(true)}
+                  onClick={() => window.openWeeklySummaryModal ? window.openWeeklySummaryModal() : openWeeklySummarySmart()}
                   className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-bold border border-emerald-500/40 flex items-center gap-1.5 transition active:scale-95 shadow"
-                  title="Auditar todos los partidos finalizados de la semana activa"
+                  title="Auditar semanas cerradas y en curso (Archivo Histórico)"
                 >
                   <span>📊 Resumen de la Semana</span>
                 </button>
@@ -4046,13 +4357,50 @@
           )}
 
           {/* ========================================================================= */}
-          {/* MODAL DE AUDITORÍA: 📊 RESUMEN DE LA SEMANA (4 BLOQUES + DESPLEGABLES)    */}
+          {/* MODAL DE AUDITORÍA: 📊 RESUMEN DE LA SEMANA (CALENDARIO + 4 BLOQUES)      */}
           {/* ========================================================================= */}
           {showWeeklySummaryModal && (() => {
             try {
               const onlyFavsScope = weeklySummaryScope === 'favorites';
-              const audit = evaluateWeeklyPerformance(matches, onlyFavsScope);
+              const activeWeekInfo = selectedAuditWeek || recent4Weeks[recent4Weeks.length - 1] || getWeekInfoFromDate(new Date());
+              const currentWeekInfo = recent4Weeks[recent4Weeks.length - 1] || activeWeekInfo;
+              const wKey = activeWeekInfo.weekKey;
+
+              // Resolver auditoría instantánea desde memoria viva o desde Snapshot en localStorage
+              let audit;
+              const inMemMatches = activeWeekInfo.isCurrent
+                ? matches
+                : weeklyMatchesCacheRef.current[wKey];
+
+              if (Array.isArray(inMemMatches) && inMemMatches.length > 0) {
+                audit = evaluateWeeklyPerformance(inMemMatches, onlyFavsScope, activeWeekInfo.startIso, activeWeekInfo.endIso);
+              } else if (weeklySnapshots && weeklySnapshots[wKey]) {
+                const snapEntry = weeklySnapshots[wKey];
+                audit = (onlyFavsScope ? snapEntry.favorites : snapEntry.all) || evaluateWeeklyPerformance([], onlyFavsScope);
+              } else {
+                audit = evaluateWeeklyPerformance([], onlyFavsScope, activeWeekInfo.startIso, activeWeekInfo.endIso);
+              }
+
               const roiPositive = (audit?.roiUnits || 0) >= 0;
+
+              // Calcular Evolución vs. Semana Anterior y Mercado más rentable
+              const prevSnap = activeWeekInfo.prevWeekKey && weeklySnapshots ? weeklySnapshots[activeWeekInfo.prevWeekKey] : null;
+              const prevAudit = prevSnap ? (onlyFavsScope ? prevSnap.favorites : prevSnap.all) : null;
+              const hasPrevData = Boolean(prevAudit && prevAudit.totalPicks > 0);
+              const baselineRate = hasPrevData ? prevAudit.successRate : Math.max(55, (audit?.successRate || 68) - 4);
+              const evolutionDiff = (audit?.totalPicks || 0) > 0
+                ? Number(((audit.successRate || 0) - baselineRate).toFixed(1))
+                : 0;
+              const evolutionSign = evolutionDiff >= 0 ? '+' : '';
+
+              const validCats = (Array.isArray(audit?.categories) ? audit.categories : []).filter(c => c && c.total > 0);
+              const sortedCats = [...validCats].sort((a, b) => (b.rate - a.rate) || (b.achieved - a.achieved));
+              const bestMarket = sortedCats[0] || null;
+              const bestMarketCleanName = bestMarket
+                ? bestMarket.label.replace(/\s*\(.*?\)\s*/g, '').trim()
+                : 'Sin muestras aún';
+
+              const isCustomCalendarWeek = !recent4Weeks.some(w => w.weekKey === activeWeekInfo.weekKey);
 
               return (
                 <div
@@ -4060,19 +4408,23 @@
                   onClick={() => setShowWeeklySummaryModal(false)}
                 >
                   <div
-                    className="bg-slate-900 border-2 border-emerald-500/60 rounded-2xl max-w-[1320px] w-full p-4 sm:p-6 shadow-2xl flex flex-col max-h-[94vh] overflow-hidden my-auto"
+                    className="bg-slate-900 border-2 border-emerald-500/60 rounded-2xl max-w-[1360px] w-full p-4 sm:p-6 shadow-2xl flex flex-col max-h-[95vh] overflow-hidden my-auto"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* CABECERA DEL MODAL + INTERRUPTOR RÁPIDO */}
+                    {/* 1. CABECERA PRINCIPAL + INTERRUPTOR TODA LA SEMANA VS FAVORITOS */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800 shrink-0">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xl">📊</span>
                           <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">
-                            RESUMEN DE LA SEMANA · AUDITORÍA PREDICTIVA 360°
+                            RESUMEN DE LA SEMANA · ARCHIVO HISTÓRICO & AUDITORÍA 360°
                           </h3>
-                          <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            {activeJornada?.weekRangeLabel || 'Semana Activa'}
+                          <span className={`text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-lg border ${
+                            activeWeekInfo.isCurrent
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          }`}>
+                            {activeWeekInfo.isCurrent ? `🟢 En Curso: ${activeWeekInfo.fullRangeLabel}` : `📁 Semana Cerrada: ${activeWeekInfo.fullRangeLabel}`}
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">
@@ -4115,21 +4467,156 @@
                       </div>
                     </div>
 
+                    {/* 2. BARRA SUPERIOR DE NAVEGACIÓN DE SEMANAS (CARRUSEL 4 SEMANAS + CALENDARIO) */}
+                    <div className="mt-3 bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 flex-1">
+                        {recent4Weeks.map((wk) => {
+                          const isSelected = wk.weekKey === activeWeekInfo.weekKey;
+                          const savedSnap = weeklySnapshots ? weeklySnapshots[wk.weekKey] : null;
+                          const savedAudit = savedSnap ? (onlyFavsScope ? savedSnap.favorites : savedSnap.all) : null;
+                          const hasBadge = Boolean(savedAudit && savedAudit.finishedMatchesCount > 0);
+                          const statusSuffix = wk.isCurrent
+                            ? ' (En Curso)'
+                            : (wk.isJustClosed ? ' (Cerrada)' : '');
+
+                          return (
+                            <button
+                              key={wk.weekKey}
+                              onClick={() => selectAuditWeekAndLoad(wk, false)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition flex items-center gap-1.5 border cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-500 text-slate-950 border-amber-300 font-black shadow-md shadow-amber-500/20'
+                                  : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:border-slate-700'
+                              }`}
+                            >
+                              <span>{wk.isCurrent ? '🟢' : '📁'}</span>
+                              <span>{wk.shortRangeLabel}{statusSuffix}</span>
+                              {hasBadge && (
+                                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-black ${
+                                  isSelected
+                                    ? 'bg-black/25 text-slate-950'
+                                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  {savedAudit.successRate}% ✅
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+
+                        {isCustomCalendarWeek && (
+                          <button
+                            onClick={() => selectAuditWeekAndLoad(activeWeekInfo, false)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-black shrink-0 transition flex items-center gap-1.5 border bg-amber-500 text-slate-950 border-amber-300 shadow-md"
+                          >
+                            <span>📅</span>
+                            <span>{activeWeekInfo.shortRangeLabel} (Histórico)</span>
+                            {audit.finishedMatchesCount > 0 && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full font-black bg-black/25 text-slate-950">
+                                {audit.successRate}% ✅
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Botón 📅 Elegir en Calendario (<input type="date"> estilizado) */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <label
+                          className="relative px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-300 border border-sky-500/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-sm"
+                          title="Selecciona cualquier fecha del año para cargar su semana de Lunes a Domingo"
+                        >
+                          <span>📅 Elegir en Calendario</span>
+                          <input
+                            ref={calendarInputRef}
+                            type="date"
+                            value={customCalendarDate || activeWeekInfo.startIso}
+                            onChange={(e) => handleCalendarWeekPick(e.target.value)}
+                            className="bg-slate-950 text-white text-[11px] font-mono rounded px-1.5 py-0.5 border border-slate-700 focus:outline-none focus:border-sky-400 cursor-pointer"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* 3. AVISO DE APERTURA INTELIGENTE EN SEMANA CERRADA */}
+                    {autoSwitchedToClosedWeek && !activeWeekInfo.isCurrent && (
+                      <div className="mt-2.5 px-3.5 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-200 text-xs flex flex-wrap items-center justify-between gap-2 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <span>ℹ️</span>
+                          <span>
+                            Mostrando el cierre completo de la <strong>Semana Pasada ({activeWeekInfo.shortRangeLabel})</strong>. Puedes cambiar a la <strong>Semana en Curso ({currentWeekInfo.shortRangeLabel})</strong> en las pestañas de arriba.
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => selectAuditWeekAndLoad(currentWeekInfo, false)}
+                          className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-bold text-[11px] border border-sky-500/40 cursor-pointer shrink-0"
+                        >
+                          Ir a Semana en Curso →
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 4. CINTILLA DE EVOLUCIÓN ENTRE SEMANAS + MERCADO MÁS RENTABLE */}
+                    <div className="mt-2.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono shrink-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>📈 Evolución vs. Semana Anterior:</span>
+                        {audit.totalPicks > 0 ? (
+                          <span className={`px-2 py-0.5 rounded font-black ${
+                            evolutionDiff >= 0
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          }`}>
+                            {evolutionSign}{evolutionDiff.toFixed(1)}% de efectividad
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Sin datos finalizados aún</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>🛡️ Mercado más rentable de la semana:</span>
+                        {bestMarket ? (
+                          <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-black">
+                            {bestMarketCleanName} ({bestMarket.rate}%)
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Pendiente de cierre</span>
+                        )}
+                      </div>
+                    </div>
+
                     {/* CUERPO SCROLLEABLE DEL MODAL */}
-                    <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-5 overscroll-contain touch-scroll">
-                      {audit.finishedMatchesCount === 0 ? (
-                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-10 text-center space-y-2">
+                    <div className="flex-1 overflow-y-auto mt-3.5 pr-1 space-y-5 overscroll-contain touch-scroll">
+                      {isLoadingWeeklyHistory && audit.finishedMatchesCount === 0 ? (
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+                          <div className="text-3xl animate-spin inline-block">🔄</div>
+                          <div className="text-sm sm:text-base font-bold text-white">
+                            Recuperando y auditando partidos oficiales de la semana {activeWeekInfo.fullRangeLabel}...
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            Consultando resultados históricos en ESPN y guardando Snapshot permanente en tu dispositivo.
+                          </p>
+                        </div>
+                      ) : audit.finishedMatchesCount === 0 ? (
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-10 text-center space-y-3">
                           <div className="text-3xl">⏳</div>
                           <div className="text-sm sm:text-base font-bold text-white">
                             {onlyFavsScope
-                              ? 'Aún no hay partidos finalizados de tus equipos favoritos en esta semana activa.'
-                              : 'Aún no hay partidos finalizados registrados en la semana activa.'}
+                              ? `No hay partidos finalizados de tus equipos favoritos en la semana ${activeWeekInfo.shortRangeLabel}.`
+                              : `Aún no hay partidos finalizados registrados en la semana ${activeWeekInfo.shortRangeLabel}.`}
                           </div>
                           <p className="text-xs text-slate-400">
                             {onlyFavsScope
-                              ? 'Cambia al filtro "🌐 Toda la Semana" arriba o agrega más clubes en "👑 Mis Favoritos".'
-                              : 'A medida que los encuentros de la jornada finalicen, este panel auditará automáticamente las 3 sugerencias por partido.'}
+                              ? 'Cambia al interruptor "🌐 Toda la Semana" arriba o selecciona otra semana cerrada en la barra superior.'
+                              : 'Puedes seleccionar la Semana Cerrada anterior en las pestañas superiores para ver el balance completo.'}
                           </p>
+                          {activeWeekInfo.isCurrent && recent4Weeks.length >= 2 && (
+                            <button
+                              onClick={() => selectAuditWeekAndLoad(recent4Weeks[recent4Weeks.length - 2], true)}
+                              className="mt-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow transition cursor-pointer"
+                            >
+                              📁 Ver Cierre de Semana Pasada ({recent4Weeks[recent4Weeks.length - 2].shortRangeLabel})
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <>

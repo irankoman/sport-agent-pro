@@ -126,6 +126,7 @@ class RealSportsService:
     _cached_matches = None
     _last_fetch = None
     _cached_teams = None
+    _historical_week_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     @classmethod
     def format_date_spanish(cls, iso_str: str) -> tuple[str, str, str, str, Any]:
@@ -597,29 +598,66 @@ class RealSportsService:
             }
         }
 
+    @staticmethod
+    def _parse_week_date_param(val: Any) -> Any:
+        if not val:
+            return None
+        try:
+            clean = str(val).strip().replace("-", "")
+            if len(clean) >= 8:
+                return datetime.datetime.strptime(clean[:8], "%Y%m%d").date()
+        except Exception:
+            pass
+        return None
+
     @classmethod
-    def fetch_live_matches_for_all_leagues(cls, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def fetch_live_matches_for_all_leagues(
+        cls,
+        force_refresh: bool = False,
+        week_start: str = None,
+        week_end: str = None
+    ) -> List[Dict[str, Any]]:
         """
         Realiza un barrido exhaustivo en paralelo de toda la semana para las 9 ligas oficiales.
-        Asigna árbitros oficiales reales y únicos y cuotas dinámicas actualizadas de Betano.
+        Soporta consultar cualquier rango de semana histórica (week_start y week_end en YYYYMMDD o YYYY-MM-DD).
         """
         now_santiago = get_santiago_now()
-        if not force_refresh and cls._cached_matches and cls._last_fetch:
-            has_live_or_today = any(
-                m.get("isLive") or (m.get("dataPhase") == "🔴 EN VIVO") or (m.get("matchDate") == now_santiago.strftime("%Y-%m-%d"))
-                for m in cls._cached_matches
-            )
-            cache_limit = 20 if has_live_or_today else 240
-            if (now_santiago - cls._last_fetch).total_seconds() < cache_limit:
-                return cls._cached_matches
+        custom_start = cls._parse_week_date_param(week_start)
+        custom_end = cls._parse_week_date_param(week_end)
+        is_custom_week = bool(custom_start and custom_end and custom_start <= custom_end)
 
-        # Obtener rango estricto de la semana calendario cerrada en America/Santiago (Lunes a Domingo)
-        week_start_date, week_end_date, days_to_check = get_current_jornada_range(now_santiago)
+        if is_custom_week:
+            # Limitar rango máximo a 10 días por seguridad
+            if (custom_end - custom_start).days > 10:
+                custom_end = custom_start + datetime.timedelta(days=6)
+            cache_key = f"{custom_start.isoformat()}_{custom_end.isoformat()}"
+            if not force_refresh and cache_key in cls._historical_week_cache:
+                return cls._historical_week_cache[cache_key]
+            week_start_date = custom_start
+            week_end_date = custom_end
+            num_days = max(1, (week_end_date - week_start_date).days + 1)
+            days_to_check = [(week_start_date + datetime.timedelta(days=i)).strftime("%Y%m%d") for i in range(num_days)]
+            range_query_str = f"{week_start_date.strftime('%Y%m%d')}-{week_end_date.strftime('%Y%m%d')}"
+        else:
+            if not force_refresh and cls._cached_matches and cls._last_fetch:
+                has_live_or_today = any(
+                    m.get("isLive") or (m.get("dataPhase") == "🔴 EN VIVO") or (m.get("matchDate") == now_santiago.strftime("%Y-%m-%d"))
+                    for m in cls._cached_matches
+                )
+                cache_limit = 20 if has_live_or_today else 240
+                if (now_santiago - cls._last_fetch).total_seconds() < cache_limit:
+                    return cls._cached_matches
+
+            # Obtener rango estricto de la semana calendario cerrada en America/Santiago (Lunes a Domingo)
+            week_start_date, week_end_date, days_to_check = get_current_jornada_range(now_santiago)
+            range_query_str = None
 
         tasks = []
         with ThreadPoolExecutor(max_workers=14) as executor:
             for l_key, cfg in LEAGUE_CONFIG.items():
                 espn_code = cfg["espn_code"]
+                if is_custom_week and range_query_str:
+                    tasks.append(executor.submit(cls._fetch_events_for_league_day, l_key, espn_code, range_query_str))
                 for d_str in days_to_check:
                     tasks.append(executor.submit(cls._fetch_events_for_league_day, l_key, espn_code, d_str))
 
@@ -1023,6 +1061,12 @@ class RealSportsService:
             processed_matches.append(match_data)
 
         processed_matches.sort(key=lambda x: (x.get("rawDate", ""), x.get("leagueId", ""), x.get("id", "")))
+
+        if is_custom_week:
+            cache_key = f"{week_start_date.isoformat()}_{week_end_date.isoformat()}"
+            if processed_matches:
+                cls._historical_week_cache[cache_key] = processed_matches
+            return processed_matches
 
         cls._cached_matches = processed_matches
         cls._last_fetch = now_santiago

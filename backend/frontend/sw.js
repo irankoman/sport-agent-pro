@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-weekly_audit_v10';
+const CACHE_NAME = 'sport-agent-v-weekly_calendar_v11';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=weekly_audit_v10',
+  '/app.js?v=weekly_calendar_v11',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'

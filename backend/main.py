@@ -51,8 +51,21 @@ class SimulateAlertRequest(BaseModel):
 
 # ----------------- ENDPOINTS API -----------------
 
-@app.get("/api/matches", response_model=List[MatchAnalysis])
-def get_matches(league: Optional[str] = None, day: Optional[str] = None, favorites_only: bool = False):
+@app.get("/api/matches")
+def get_matches(
+    league: Optional[str] = None,
+    day: Optional[str] = None,
+    favorites_only: bool = False,
+    week_start: Optional[str] = None,
+    week_end: Optional[str] = None
+):
+    if week_start and week_end:
+        return RealSportsService.fetch_live_matches_for_all_leagues(
+            force_refresh=False,
+            week_start=week_start,
+            week_end=week_end
+        )
+
     results = CURRENT_MATCHES
     
     # Actualizar estado de favorito según las preferencias del usuario
@@ -140,9 +153,17 @@ from backend.services.news_scraper import ContextNewsScraper
 extract_goals_by_team = RealSportsService.extract_goals_by_team
 
 @app.get("/api/real-matches")
-def get_real_matches(force_refresh: bool = False):
-    """Obtiene partidos reales y actualizados de las 9 ligas oficiales desde la API deportiva."""
-    return RealSportsService.fetch_live_matches_for_all_leagues(force_refresh=force_refresh)
+def get_real_matches(
+    force_refresh: bool = False,
+    week_start: Optional[str] = None,
+    week_end: Optional[str] = None
+):
+    """Obtiene partidos reales y actualizados de las 9 ligas oficiales desde la API deportiva (soporta semanas históricas vía week_start y week_end)."""
+    return RealSportsService.fetch_live_matches_for_all_leagues(
+        force_refresh=force_refresh,
+        week_start=week_start,
+        week_end=week_end
+    )
 
 @app.get("/api/all-teams")
 def get_all_teams():
