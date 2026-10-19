@@ -260,6 +260,45 @@
       }
     };
 
+    function renderPostMatchGoals(match) {
+      const homeName = match?.homeTeam?.name || (typeof match?.homeTeam === 'string' ? match.homeTeam : '') || match?.home_name || 'Local';
+      const awayName = match?.awayTeam?.name || (typeof match?.awayTeam === 'string' ? match.awayTeam : '') || match?.away_name || 'Visita';
+
+      const rawHome = match?.homeGoals || match?.postMatchReport?.homeGoals || match?.postMatchReport?.goalsAudit?.homeGoals;
+      const rawAway = match?.awayGoals || match?.postMatchReport?.awayGoals || match?.postMatchReport?.goalsAudit?.awayGoals;
+      const homeGoals = Array.isArray(rawHome) ? rawHome : [];
+      const awayGoals = Array.isArray(rawAway) ? rawAway : [];
+
+      const renderBadges = (goalsList, teamLabel, badgeBg) => {
+        if (!Array.isArray(goalsList) || goalsList.length === 0) {
+          return `<div style="opacity:0.6; font-size:0.85rem; padding:6px 0;">Sin goles registrados</div>`;
+        }
+        return goalsList.map(g => {
+          const min = g?.minute || '';
+          const ply = g?.player || 'Gol';
+          return `<div style="display:inline-flex; align-items:center; gap:6px; background:${badgeBg}; border:1px solid rgba(16,185,129,0.35); border-radius:20px; padding:4px 12px; margin:3px 0; font-size:0.85rem;">
+        <span>⚽ <strong>${min}</strong> ${ply} <span style="opacity:0.75;">(${teamLabel})</span></span>
+      </div>`;
+        }).join('<br>');
+      };
+
+      return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin:10px 0;">
+      <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:10px;">
+        <div style="font-weight:700; color:#38bdf8; margin-bottom:6px; font-size:0.9rem;">🏠 Goles ${homeName}</div>
+        ${renderBadges(homeGoals, homeName, 'rgba(6,78,59,0.45)')}
+      </div>
+      <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:10px;">
+        <div style="font-weight:700; color:#fbbf24; margin-bottom:6px; font-size:0.9rem;">✈️ Goles ${awayName}</div>
+        ${renderBadges(awayGoals, awayName, 'rgba(6,78,59,0.45)')}
+      </div>
+    </div>
+  `;
+    }
+    if (typeof window !== 'undefined') {
+      window.renderPostMatchGoals = renderPostMatchGoals;
+    }
+
     const STORAGE_KEY_FAVORITES = 'sportagent_favorite_teams_v3';
 
     // Cargar selecciones manuales guardadas en localStorage (Sin equipos fijos por código)
@@ -1335,16 +1374,20 @@
                           const ga = pm.goalsAudit || null;
                           const isGoalsHit = ga ? ga.hit : true;
                           const goalEvents = (ga && Array.isArray(ga.goalEvents)) ? ga.goalEvents : [];
-                          const homeGoalsList = (ga && Array.isArray(ga.homeGoals))
-                            ? ga.homeGoals
-                            : (Array.isArray(pm.homeGoals)
-                              ? pm.homeGoals
-                              : goalEvents.filter((g) => g && g.team === selectedMatch.homeTeam));
-                          const awayGoalsList = (ga && Array.isArray(ga.awayGoals))
-                            ? ga.awayGoals
-                            : (Array.isArray(pm.awayGoals)
-                              ? pm.awayGoals
-                              : goalEvents.filter((g) => g && g.team === selectedMatch.awayTeam));
+                          const homeGoalsList = Array.isArray(selectedMatch.homeGoals) && selectedMatch.homeGoals.length > 0
+                            ? selectedMatch.homeGoals
+                            : ((ga && Array.isArray(ga.homeGoals))
+                              ? ga.homeGoals
+                              : (Array.isArray(pm.homeGoals)
+                                ? pm.homeGoals
+                                : goalEvents.filter((g) => g && g.team === selectedMatch.homeTeam)));
+                          const awayGoalsList = Array.isArray(selectedMatch.awayGoals) && selectedMatch.awayGoals.length > 0
+                            ? selectedMatch.awayGoals
+                            : ((ga && Array.isArray(ga.awayGoals))
+                              ? ga.awayGoals
+                              : (Array.isArray(pm.awayGoals)
+                                ? pm.awayGoals
+                                : goalEvents.filter((g) => g && g.team === selectedMatch.awayTeam)));
 
                           return (
                             <div className={`border-2 rounded-2xl p-5 shadow-xl transition ${
@@ -1393,53 +1436,52 @@
                                     </div>
                                   </div>
 
-                                  <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                  <div
+                                    className="mt-3 pt-3 border-t border-slate-800/80"
+                                    style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}
+                                  >
                                     {/* Bloque Local */}
-                                    <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5">
-                                      <span className="text-[10px] text-orange-400 font-black block mb-1.5 uppercase truncate" title={selectedMatch.homeTeam}>
-                                        🏠 Goles {selectedMatch.homeTeam}:
-                                      </span>
+                                    <div style={{ background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(56,189,248,0.25)', borderRadius: '10px', padding: '10px' }}>
+                                      <div style={{ fontWeight: 700, color: '#38bdf8', marginBottom: '6px', fontSize: '0.85rem' }}>
+                                        🏠 Goles {selectedMatch.homeTeam}
+                                      </div>
                                       {homeGoalsList.length > 0 ? (
-                                        <div className="flex flex-col gap-1">
+                                        <div className="flex flex-col items-start gap-1">
                                           {homeGoalsList.map((g, idx) => (
-                                            <span
+                                            <div
                                               key={`hg_${idx}`}
-                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-[11px] font-mono text-emerald-300 shadow-sm"
+                                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(6,78,59,0.45)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: '20px', padding: '4px 12px', fontSize: '0.8rem' }}
                                             >
-                                              <span>⚽</span>
-                                              <strong className="text-white">{(g && g.minute) ? g.minute : '•'}</strong>
-                                              <span className="truncate">{(g && g.player) ? g.player : 'Gol'}</span>
-                                            </span>
+                                              <span>⚽ <strong>{(g && g.minute) ? g.minute : ''}</strong> {(g && g.player) ? g.player : 'Gol'} <span style={{ opacity: 0.75 }}>({selectedMatch.homeTeam})</span></span>
+                                            </div>
                                           ))}
                                         </div>
                                       ) : (
-                                        <div className="text-[11px] text-slate-500 italic font-mono">
-                                          Sin goles
+                                        <div style={{ opacity: 0.6, fontSize: '0.8rem', padding: '6px 0' }}>
+                                          Sin goles registrados
                                         </div>
                                       )}
                                     </div>
 
                                     {/* Bloque Visitante */}
-                                    <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5">
-                                      <span className="text-[10px] text-sky-400 font-black block mb-1.5 uppercase truncate" title={selectedMatch.awayTeam}>
-                                        ✈️ Goles {selectedMatch.awayTeam}:
-                                      </span>
+                                    <div style={{ background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: '10px', padding: '10px' }}>
+                                      <div style={{ fontWeight: 700, color: '#fbbf24', marginBottom: '6px', fontSize: '0.85rem' }}>
+                                        ✈️ Goles {selectedMatch.awayTeam}
+                                      </div>
                                       {awayGoalsList.length > 0 ? (
-                                        <div className="flex flex-col gap-1">
+                                        <div className="flex flex-col items-start gap-1">
                                           {awayGoalsList.map((g, idx) => (
-                                            <span
+                                            <div
                                               key={`ag_${idx}`}
-                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-950/60 border border-sky-500/40 text-[11px] font-mono text-sky-300 shadow-sm"
+                                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(6,78,59,0.45)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: '20px', padding: '4px 12px', fontSize: '0.8rem' }}
                                             >
-                                              <span>⚽</span>
-                                              <strong className="text-white">{(g && g.minute) ? g.minute : '•'}</strong>
-                                              <span className="truncate">{(g && g.player) ? g.player : 'Gol'}</span>
-                                            </span>
+                                              <span>⚽ <strong>{(g && g.minute) ? g.minute : ''}</strong> {(g && g.player) ? g.player : 'Gol'} <span style={{ opacity: 0.75 }}>({selectedMatch.awayTeam})</span></span>
+                                            </div>
                                           ))}
                                         </div>
                                       ) : (
-                                        <div className="text-[11px] text-slate-500 italic font-mono">
-                                          Sin goles
+                                        <div style={{ opacity: 0.6, fontSize: '0.8rem', padding: '6px 0' }}>
+                                          Sin goles registrados
                                         </div>
                                       )}
                                     </div>

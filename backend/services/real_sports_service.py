@@ -995,8 +995,11 @@ class RealSportsService:
             match_data["deepAnalytics"] = deep_analytics
             match_data["betanoLevel2"] = b2_picks
 
+            match_data["homeGoals"] = []
+            match_data["awayGoals"] = []
+
             if is_finished:
-                match_data["postMatchReport"] = cls._build_post_match_audit(
+                pm_rep = cls._build_post_match_audit(
                     ev_id=ev_id,
                     espn_league_code=espn_league_code,
                     espn_event_id=espn_event_id,
@@ -1013,6 +1016,9 @@ class RealSportsService:
                     home_team_id=home_team_id,
                     away_team_id=away_team_id
                 )
+                match_data["postMatchReport"] = pm_rep
+                match_data["homeGoals"] = pm_rep.get("homeGoals", [])
+                match_data["awayGoals"] = pm_rep.get("awayGoals", [])
 
             processed_matches.append(match_data)
 
