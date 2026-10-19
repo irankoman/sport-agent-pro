@@ -137,6 +137,8 @@ from backend.services.real_sports_service import RealSportsService
 from backend.services.polling_engine import PollingEngine
 from backend.services.news_scraper import ContextNewsScraper
 
+extract_goals_by_team = RealSportsService.extract_goals_by_team
+
 @app.get("/api/real-matches")
 def get_real_matches(force_refresh: bool = False):
     """Obtiene partidos reales y actualizados de las 9 ligas oficiales desde la API deportiva."""

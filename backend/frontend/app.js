@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=live_odds_v1')
+        navigator.serviceWorker.register('/sw.js?v=team_goals_starters_v4')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=live_odds_v1')
+            navigator.serviceWorker.register('/service-worker.js?v=team_goals_starters_v4')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -1145,21 +1145,23 @@
             const isFav = isMatchFavorite(selectedMatch);
             const pm = selectedMatch.postMatchReport || {};
 
-            // Analítica activa según modo (Previa vs Once Oficial Confirmado)
-            const activeAnalytics = (lineupMode === 'CONFIRMADO'
+            // Analítica activa según modo (Previa vs Once Oficial Confirmado; forzado a CONFIRMADO en vivo/finalizado)
+            const forceConfirmed = Boolean(selectedMatch.isLive || isFin || selectedMatch.playerAnalytics?.isOfficialConfirmed || lineupMode === 'CONFIRMADO');
+            const activeAnalytics = (forceConfirmed
               ? (selectedMatch.playerAnalytics?.confirmed || selectedMatch.playerAnalytics)
               : (selectedMatch.playerAnalytics?.previa || selectedMatch.playerAnalytics)
             ) || {};
 
-            const activeDeep = (lineupMode === 'CONFIRMADO'
+            const activeDeep = (forceConfirmed
               ? (selectedMatch.deepAnalytics?.confirmed || selectedMatch.deepAnalytics)
               : (selectedMatch.deepAnalytics?.previa || selectedMatch.deepAnalytics)
             ) || {};
 
-            const topScorers = activeAnalytics.topScorers || [];
-            const topCards = activeAnalytics.topCards || [];
+            const rawTopScorers = Array.isArray(activeAnalytics.topScorers) ? activeAnalytics.topScorers : [];
+            const topScorers = rawTopScorers.filter((sc) => sc && sc.starter !== false && sc.isStarter !== false);
+            const topCards = Array.isArray(activeAnalytics.topCards) ? activeAnalytics.topCards : [];
             const tacticalPlanB = activeAnalytics.tacticalPlanB || null;
-            const snipers = activeAnalytics.snipers || [];
+            const snipers = Array.isArray(activeAnalytics.snipers) ? activeAnalytics.snipers : [];
 
             const shotsAnalytics = activeDeep.shotsAnalytics || {};
             const cornersAndXg = activeDeep.cornersAndXgMatrix || {};
@@ -1332,7 +1334,17 @@
                         {(() => {
                           const ga = pm.goalsAudit || null;
                           const isGoalsHit = ga ? ga.hit : true;
-                          const goalEvents = (ga && ga.goalEvents) ? ga.goalEvents : [];
+                          const goalEvents = (ga && Array.isArray(ga.goalEvents)) ? ga.goalEvents : [];
+                          const homeGoalsList = (ga && Array.isArray(ga.homeGoals))
+                            ? ga.homeGoals
+                            : (Array.isArray(pm.homeGoals)
+                              ? pm.homeGoals
+                              : goalEvents.filter((g) => g && g.team === selectedMatch.homeTeam));
+                          const awayGoalsList = (ga && Array.isArray(ga.awayGoals))
+                            ? ga.awayGoals
+                            : (Array.isArray(pm.awayGoals)
+                              ? pm.awayGoals
+                              : goalEvents.filter((g) => g && g.team === selectedMatch.awayTeam));
 
                           return (
                             <div className={`border-2 rounded-2xl p-5 shadow-xl transition ${
@@ -1348,7 +1360,7 @@
                                       AUDITORÍA DE GOLES REALES VS PROYECCIÓN IA
                                     </h3>
                                     <p className="text-[11px] text-slate-400">
-                                      Verificación minuto a minuto de anotadores oficiales y cumplimiento de línea de gol
+                                      Verificación minuto a minuto de anotadores oficiales separados por club y cumplimiento de línea
                                     </p>
                                   </div>
                                 </div>
@@ -1364,7 +1376,7 @@
                               </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mt-4">
-                                {/* Goles Reales Anotados */}
+                                {/* Goles Reales Anotados Separados por Equipo */}
                                 <div className="md:col-span-5 bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
                                   <div>
                                     <div className="flex items-center justify-between">
@@ -1381,30 +1393,56 @@
                                     </div>
                                   </div>
 
-                                  <div className="mt-3 pt-3 border-t border-slate-800/80">
-                                    <span className="text-[10px] text-slate-400 font-bold block mb-1.5 uppercase">
-                                      Autores Oficiales y Minuto:
-                                    </span>
-                                    {goalEvents.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {goalEvents.map((g, idx) => (
-                                          <span
-                                            key={idx}
-                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-[11px] font-mono text-emerald-300 shadow-sm"
-                                          >
-                                            <span>⚽</span>
-                                            <strong className="text-white">{g.minute}</strong>
-                                            <span>{g.player}</span>
-                                            {g.team && <span className="text-slate-400 text-[10px]">({g.team})</span>}
-                                            {g.type && g.type.includes('Penal') && <span className="text-amber-400 font-bold text-[10px]">(Pen)</span>}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div className="text-xs text-slate-400 italic">
-                                        Partido sin anotaciones o sin goles individuales registrados.
-                                      </div>
-                                    )}
+                                  <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    {/* Bloque Local */}
+                                    <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5">
+                                      <span className="text-[10px] text-orange-400 font-black block mb-1.5 uppercase truncate" title={selectedMatch.homeTeam}>
+                                        🏠 Goles {selectedMatch.homeTeam}:
+                                      </span>
+                                      {homeGoalsList.length > 0 ? (
+                                        <div className="flex flex-col gap-1">
+                                          {homeGoalsList.map((g, idx) => (
+                                            <span
+                                              key={`hg_${idx}`}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-[11px] font-mono text-emerald-300 shadow-sm"
+                                            >
+                                              <span>⚽</span>
+                                              <strong className="text-white">{(g && g.minute) ? g.minute : '•'}</strong>
+                                              <span className="truncate">{(g && g.player) ? g.player : 'Gol'}</span>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="text-[11px] text-slate-500 italic font-mono">
+                                          Sin goles
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Bloque Visitante */}
+                                    <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5">
+                                      <span className="text-[10px] text-sky-400 font-black block mb-1.5 uppercase truncate" title={selectedMatch.awayTeam}>
+                                        ✈️ Goles {selectedMatch.awayTeam}:
+                                      </span>
+                                      {awayGoalsList.length > 0 ? (
+                                        <div className="flex flex-col gap-1">
+                                          {awayGoalsList.map((g, idx) => (
+                                            <span
+                                              key={`ag_${idx}`}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-950/60 border border-sky-500/40 text-[11px] font-mono text-sky-300 shadow-sm"
+                                            >
+                                              <span>⚽</span>
+                                              <strong className="text-white">{(g && g.minute) ? g.minute : '•'}</strong>
+                                              <span className="truncate">{(g && g.player) ? g.player : 'Gol'}</span>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="text-[11px] text-slate-500 italic font-mono">
+                                          Sin goles
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 

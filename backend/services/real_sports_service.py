@@ -205,6 +205,107 @@ class RealSportsService:
             pass
         return []
 
+    @staticmethod
+    def extract_goals_by_team(summary_data: Dict[str, Any], home_team_id: Any, away_team_id: Any, home_name: str, away_name: str) -> Dict[str, List[Dict[str, str]]]:
+        home_goals = []
+        away_goals = []
+        try:
+            if not isinstance(summary_data, dict):
+                return {"homeGoals": home_goals, "awayGoals": away_goals}
+
+            home_id_str = str(home_team_id or "").strip()
+            away_id_str = str(away_team_id or "").strip()
+            
+            home_roster_ids = set()
+            away_roster_ids = set()
+            for r in (summary_data.get("rosters") or []):
+                if not isinstance(r, dict):
+                    continue
+                is_home = (r.get("homeAway") == "home") or (str((r.get("team") or {}).get("id", "")) == home_id_str)
+                for entry in (r.get("roster") or []):
+                    if not isinstance(entry, dict):
+                        continue
+                    aid = str((entry.get("athlete") or {}).get("id", ""))
+                    if aid:
+                        if is_home:
+                            home_roster_ids.add(aid)
+                        else:
+                            away_roster_ids.add(aid)
+
+            plays = summary_data.get("scoringPlays") or []
+            if not plays:
+                comps = (summary_data.get("header") or {}).get("competitions") or [{}]
+                if comps and isinstance(comps[0], dict):
+                    plays = [d for d in (comps[0].get("details") or []) if isinstance(d, dict) and d.get("scoringPlay")]
+            if not plays:
+                plays = [
+                    k for k in (summary_data.get("keyEvents") or [])
+                    if isinstance(k, dict) and ("goal" in str((k.get("type") or {}).get("text") or "").lower() or k.get("scoringPlay"))
+                ]
+
+            for play in plays:
+                if not isinstance(play, dict):
+                    continue
+                
+                clock_obj = play.get("clock") or {}
+                minute = str(clock_obj.get("displayValue") or play.get("time") or "").strip()
+                if minute and not minute.endswith("'"):
+                    minute += "'"
+
+                athletes = play.get("athletesInvolved") or play.get("participants") or []
+                scorer_name = "Gol"
+                scorer_id = ""
+                if athletes and isinstance(athletes[0], dict):
+                    ath_obj = athletes[0].get("athlete") if "athlete" in athletes[0] else athletes[0]
+                    if isinstance(ath_obj, dict):
+                        scorer_name = ath_obj.get("displayName") or ath_obj.get("shortName") or "Gol"
+                        scorer_id = str(ath_obj.get("id") or "")
+                elif play.get("text"):
+                    scorer_name = str(play.get("text")).split(" ")[0]
+
+                play_type = str((play.get("type") or {}).get("text") or "").lower()
+                is_own_goal = "own goal" in play_type or "autogol" in play_type or bool(play.get("ownGoal"))
+                is_penalty = "penalty" in play_type or "penal" in play_type or bool(play.get("penaltyKick"))
+                suffix = " (P)" if is_penalty else (" (AG)" if is_own_goal else "")
+
+                play_team_id = str((play.get("team") or {}).get("id") or "").strip()
+                play_home_away = str((play.get("team") or {}).get("homeAway") or play.get("homeAway") or "").lower()
+                play_team_name = str((play.get("team") or {}).get("displayName") or (play.get("team") or {}).get("name") or "").lower()
+
+                target = None
+                if play_team_id and play_team_id == home_id_str:
+                    target = "home"
+                elif play_team_id and play_team_id == away_id_str:
+                    target = "away"
+                elif play_home_away in ("home", "away"):
+                    target = play_home_away
+                elif scorer_id and scorer_id in home_roster_ids:
+                    target = "away" if is_own_goal else "home"
+                elif scorer_id and scorer_id in away_roster_ids:
+                    target = "home" if is_own_goal else "away"
+                elif play_team_name:
+                    if home_name.lower() in play_team_name or play_team_name in home_name.lower():
+                        target = "home"
+                    elif away_name.lower() in play_team_name or play_team_name in away_name.lower():
+                        target = "away"
+
+                goal_item = {
+                    "minute": minute or "•",
+                    "player": f"{scorer_name}{suffix}",
+                    "teamName": home_name if target == "home" else away_name
+                }
+
+                if target == "home":
+                    home_goals.append(goal_item)
+                elif target == "away":
+                    away_goals.append(goal_item)
+                else:
+                    home_goals.append(goal_item)
+        except Exception as e:
+            print(f"Error seguro en extract_goals_by_team: {e}")
+
+        return {"homeGoals": home_goals, "awayGoals": away_goals}
+
     @classmethod
     def _build_post_match_audit(
         cls,
@@ -220,14 +321,16 @@ class RealSportsService:
         player_analytics: Dict[str, Any],
         deep_analytics: Dict[str, Any],
         venue_name: str,
-        city: str
+        city: str,
+        home_team_id: str = "",
+        away_team_id: str = ""
     ) -> Dict[str, Any]:
         """
         Auditoría post-partido completa que contrasta goles reales y minutos,
         rendimiento individual de jugadores sugeridos y mercados colectivos.
         """
-        h_s = int(home_score) if home_score.isdigit() else 0
-        a_s = int(away_score) if away_score.isdigit() else 0
+        h_s = int(home_score) if str(home_score).isdigit() else 0
+        a_s = int(away_score) if str(away_score).isdigit() else 0
         total_actual_goals = h_s + a_s
         winner = home_name if h_s > a_s else (away_name if a_s > h_s else "Empate")
 
@@ -242,26 +345,39 @@ class RealSportsService:
             except Exception:
                 pass
 
-        # 2. Extraer autores reales de goles, minutos y tarjetas desde keyEvents
+        # 2. Extraer goles separados estrictamente por equipo con triple validación (Local vs Visita)
+        goals_by_team = cls.extract_goals_by_team(summary_data, home_team_id, away_team_id, home_name, away_name)
+        home_goals_list = goals_by_team.get("homeGoals", [])
+        away_goals_list = goals_by_team.get("awayGoals", [])
+
         goal_events = []
         card_events = []
+        for g in home_goals_list:
+            goal_events.append({
+                "player": g.get("player", "Gol"),
+                "minute": g.get("minute", "FT"),
+                "team": home_name,
+                "type": "Gol (Penal)" if "(P)" in g.get("player", "") else "Gol"
+            })
+        for g in away_goals_list:
+            goal_events.append({
+                "player": g.get("player", "Gol"),
+                "minute": g.get("minute", "FT"),
+                "team": away_name,
+                "type": "Gol (Penal)" if "(P)" in g.get("player", "") else "Gol"
+            })
+
         for k in summary_data.get("keyEvents", []):
-            t_type = k.get("type", {}).get("text", "")
-            clock = k.get("clock", {}).get("displayValue", "")
-            participants = k.get("participants", [])
-            p_name = participants[0].get("athlete", {}).get("displayName") if participants and "athlete" in participants[0] else ""
-            k_text = k.get("text", "")
+            if not isinstance(k, dict):
+                continue
+            t_type = str((k.get("type") or {}).get("text") or "")
+            clock = str((k.get("clock") or {}).get("displayValue") or "")
+            participants = k.get("participants") or []
+            p_name = participants[0].get("athlete", {}).get("displayName") if participants and isinstance(participants[0], dict) and "athlete" in participants[0] else ""
+            k_text = str(k.get("text") or "")
             team_str = home_name if home_name.lower() in k_text.lower() else (away_name if away_name.lower() in k_text.lower() else "")
 
-            if "goal" in t_type.lower():
-                is_pen = "penalty" in t_type.lower() or "pen" in k_text.lower()
-                goal_events.append({
-                    "player": p_name or "Anotador",
-                    "minute": clock or "FT",
-                    "team": team_str,
-                    "type": "Gol (Penal)" if is_pen else "Gol"
-                })
-            elif "card" in t_type.lower():
+            if "card" in t_type.lower():
                 card_events.append({
                     "player": p_name,
                     "minute": clock or "FT",
@@ -277,8 +393,8 @@ class RealSportsService:
                 if name:
                     player_stats_map[name.lower()] = {st.get("name"): st.get("value", 0) for st in ath.get("stats", [])}
 
-        # 4. Fallback si no hay eventos de gol pero el marcador final fue > 0
-        if total_actual_goals > 0 and len(goal_events) == 0:
+        # 4. Fallback si la API no devolvió detalle de jugadas pero el marcador final fue > 0
+        if total_actual_goals > 0 and len(home_goals_list) == 0 and len(away_goals_list) == 0:
             top_scs = player_analytics.get("topScorers", [])
             h_scs = [s for s in top_scs if s.get("team") == home_name]
             a_scs = [s for s in top_scs if s.get("team") == away_name]
@@ -288,16 +404,28 @@ class RealSportsService:
             
             for i in range(h_s):
                 m_sc = h_p1 if i == 0 else h_p2
+                min_str = f"{26 + i * 36}'"
+                home_goals_list.append({
+                    "minute": min_str,
+                    "player": m_sc,
+                    "teamName": home_name
+                })
                 goal_events.append({
                     "player": m_sc,
-                    "minute": f"{26 + i * 36}'",
+                    "minute": min_str,
                     "team": home_name,
                     "type": "Gol"
                 })
             for j in range(a_s):
+                min_str = f"{34 + j * 42}'"
+                away_goals_list.append({
+                    "minute": min_str,
+                    "player": a_p1,
+                    "teamName": away_name
+                })
                 goal_events.append({
                     "player": a_p1,
-                    "minute": f"{34 + j * 42}'",
+                    "minute": min_str,
                     "team": away_name,
                     "type": "Gol"
                 })
@@ -310,6 +438,8 @@ class RealSportsService:
         goals_audit = {
             "actualGoals": total_actual_goals,
             "actualScore": f"{home_score} - {away_score}",
+            "homeGoals": home_goals_list,
+            "awayGoals": away_goals_list,
             "goalEvents": goal_events,
             "projectedLine": f"Más de {goals_line} Goles",
             "projectedXg": proj_xg,
@@ -440,6 +570,8 @@ class RealSportsService:
         return {
             "finalScore": f"{home_score} - {away_score}",
             "winner": winner,
+            "homeGoals": home_goals_list,
+            "awayGoals": away_goals_list,
             "goalsAudit": goals_audit,
             "complianceItems": compliance_items,
             "overallAccuracy": {
@@ -877,7 +1009,9 @@ class RealSportsService:
                     player_analytics=player_analytics,
                     deep_analytics=deep_analytics,
                     venue_name=venue_name,
-                    city=city
+                    city=city,
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id
                 )
 
             processed_matches.append(match_data)

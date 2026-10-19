@@ -164,10 +164,21 @@ class MultiSourceRosterEngine:
 
         if real_event_id and real_event_id.isdigit():
             try:
-                sum_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={real_event_id}"
-                res_sum = requests.get(sum_url, timeout=4.5)
-                if res_sum.status_code == 200:
-                    sum_data = res_sum.json()
+                sum_cache_key = (l_code, real_event_id)
+                sum_data = None
+                if not hasattr(cls, "_SUMMARY_CACHE"):
+                    cls._SUMMARY_CACHE = {}
+                if sum_cache_key in cls._SUMMARY_CACHE:
+                    s_ts, s_cached = cls._SUMMARY_CACHE[sum_cache_key]
+                    if (time.time() - s_ts) < 15:
+                        sum_data = s_cached
+                if sum_data is None:
+                    sum_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={real_event_id}"
+                    res_sum = requests.get(sum_url, timeout=4.5)
+                    if res_sum.status_code == 200:
+                        sum_data = res_sum.json()
+                        cls._SUMMARY_CACHE[sum_cache_key] = (time.time(), sum_data)
+                if isinstance(sum_data, dict):
                     for r_entry in sum_data.get("rosters", []):
                         r_team = r_entry.get("team", {})
                         r_team_id = str(r_team.get("id", ""))
@@ -187,7 +198,7 @@ class MultiSourceRosterEngine:
                                     continue
                                 pos_obj = item.get("position", {})
                                 pos_code = (pos_obj.get("abbreviation") or ath.get("position", {}).get("abbreviation", "M")).upper()
-                                is_st = (item.get("starter") is True)
+                                is_st = (item.get("starter") is True) or (str(item.get("starter", "")).lower() == "true")
                                 p_dict = {
                                     "name": name,
                                     "pos_code": pos_code,
@@ -225,9 +236,12 @@ class MultiSourceRosterEngine:
         benched_notice = None
 
         if has_official_lineup:
-            # 1. Extraer jugadores titulares confirmados en cancha (SOLO starter: true)
+            bench_norm_set = {norm_player_name(b["name"]) for b in official_bench}
+            # 1. Extraer jugadores titulares confirmados en cancha (SOLO starter: true, jamás en official_bench)
             for st in official_starters:
                 name = st["name"]
+                if norm_player_name(name) in bench_norm_set:
+                    continue
                 pos = st["pos_code"]
                 if pos == "G" or "GK" in pos:
                     gks.append(name)
@@ -242,6 +256,8 @@ class MultiSourceRosterEngine:
             # 2. Promover volantes ofensivos y extremos titulares al ataque si faltan delanteros centro
             for st in official_starters:
                 name = st["name"]
+                if norm_player_name(name) in bench_norm_set:
+                    continue
                 pos = st["pos_code"]
                 if any(c in pos for c in ["AM", "W", "LM", "RM"]) and name not in fws and name not in gks and name not in dfs:
                     fws.append(name)
@@ -249,6 +265,8 @@ class MultiSourceRosterEngine:
             # 3. Si aún faltan delanteros, agregar los restantes volantes titulares
             for st in official_starters:
                 name = st["name"]
+                if norm_player_name(name) in bench_norm_set:
+                    continue
                 if name not in fws and name not in gks and name not in dfs:
                     fws.append(name)
 

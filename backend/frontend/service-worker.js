@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-live_odds_v1';
+const CACHE_NAME = 'sport-agent-v-team_goals_starters_v4';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=live_odds_v1',
+  '/app.js?v=team_goals_starters_v4',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'
