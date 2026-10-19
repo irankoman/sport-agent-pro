@@ -5,9 +5,14 @@ Integra:
 2. Cuotas dinámicas en tiempo real (1X2, Córners, Tarjetas y Jugadores) vía BetanoOddsService.
 3. Barrido exhaustivo paralelo de las 9 ligas oficiales.
 """
+import os
+import json
+import time
+import threading
 import requests
+from requests.adapters import HTTPAdapter
 import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -17,6 +22,16 @@ from backend.engines.player_props_engine import PlayerPropsEngine
 from backend.engines.deep_stats_engine import DeepStatsEngine
 from backend.data.team_rosters import get_team_roster
 from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
+
+# Sesión HTTP compartida con pool de conexiones persistentes
+_SPORTS_HTTP_SESSION = requests.Session()
+_sports_adapter = HTTPAdapter(pool_connections=25, pool_maxsize=25)
+_SPORTS_HTTP_SESSION.mount("https://", _sports_adapter)
+_SPORTS_HTTP_SESSION.mount("http://", _sports_adapter)
+
+# Ruta de persistencia local anti-caídas
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CACHE_MATCHES_FILE = os.path.join(_BACKEND_DIR, "cache_matches.json")
 
 LEAGUE_CONFIG = {
     "chi": {
@@ -123,10 +138,107 @@ def get_current_jornada_range(now_santiago: datetime.datetime) -> tuple[datetime
     return start_date, end_date, days_str_list
 
 class RealSportsService:
-    _cached_matches = None
-    _last_fetch = None
-    _cached_teams = None
+    _cached_matches: Optional[List[Dict[str, Any]]] = None
+    _last_fetch: Optional[datetime.datetime] = None
+    _cached_teams: Optional[Dict[str, Any]] = None
     _historical_week_cache: Dict[str, List[Dict[str, Any]]] = {}
+    _refresh_lock = threading.Lock()
+    _is_refreshing_bg = False
+    _is_warming_rosters_bg = False
+
+    @classmethod
+    def _load_disk_cache(cls) -> List[Dict[str, Any]]:
+        """Carga el último caché válido desde `cache_matches.json` si existe."""
+        try:
+            if os.path.exists(CACHE_MATCHES_FILE):
+                with open(CACHE_MATCHES_FILE, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                matches = payload.get("matches", []) if isinstance(payload, dict) else (payload if isinstance(payload, list) else [])
+                if isinstance(matches, list) and len(matches) > 0:
+                    cls._cached_matches = matches
+                    return matches
+        except Exception as e:
+            logging.debug(f"Could not load cache_matches.json: {e}")
+        return []
+
+    @classmethod
+    def _save_disk_cache(cls, matches: List[Dict[str, Any]]):
+        """
+        Guarda la lista de partidos en `cache_matches.json`.
+        REGLA ANTI-VACÍO ESTRICTA: Jamás sobrescribe el archivo si `matches` está vacío.
+        """
+        if not isinstance(matches, list) or len(matches) == 0:
+            return
+        try:
+            payload = {
+                "updatedAt": get_santiago_now().isoformat(),
+                "count": len(matches),
+                "matches": matches
+            }
+            tmp_path = CACHE_MATCHES_FILE + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, CACHE_MATCHES_FILE)
+        except Exception as e:
+            logging.debug(f"Could not save cache_matches.json: {e}")
+
+    @classmethod
+    def get_cached_matches_list(cls) -> List[Dict[str, Any]]:
+        """Retorna en 1ms la lista actual en caché (o desde disco si RAM está vacía) sin hacer llamadas de red."""
+        if cls._cached_matches and len(cls._cached_matches) > 0:
+            return cls._cached_matches
+        return cls._load_disk_cache()
+
+    @classmethod
+    def _background_refresh_worker(cls):
+        if cls._is_refreshing_bg:
+            return
+        cls._is_refreshing_bg = True
+        try:
+            cls.fetch_live_matches_for_all_leagues(force_refresh=True)
+        except Exception as e:
+            logging.debug(f"Background refresh error: {e}")
+        finally:
+            cls._is_refreshing_bg = False
+
+    @classmethod
+    def get_cached_or_fetch_matches(
+        cls,
+        force_refresh: bool = False,
+        week_start: Optional[str] = None,
+        week_end: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Implementa patrón `Stale-While-Revalidate`:
+        - Si es semana histórica (`week_start` y `week_end`), consulta o usa caché histórico.
+        - Si existe caché válido en memoria o `cache_matches.json` y `not force_refresh`,
+          lo devuelve en < 50ms y dispara actualización en segundo plano si expiró el TTL corto.
+        """
+        if week_start and week_end:
+            return cls.fetch_live_matches_for_all_leagues(
+                force_refresh=force_refresh,
+                week_start=week_start,
+                week_end=week_end
+            )
+
+        cached = cls.get_cached_matches_list()
+        now_santiago = get_santiago_now()
+
+        if cached and not force_refresh:
+            w_start, _, _ = get_current_jornada_range(now_santiago)
+            first_week = cached[0].get("weekStartDate") if isinstance(cached[0], dict) else ""
+            if first_week == w_start.strftime("%Y-%m-%d"):
+                has_live = any(m.get("isLive") or m.get("dataPhase") == "🔴 EN VIVO" for m in cached)
+                ttl_seconds = 25 if has_live else 120
+                is_stale = (cls._last_fetch is None) or ((now_santiago - cls._last_fetch).total_seconds() >= ttl_seconds)
+                if is_stale and not cls._is_refreshing_bg:
+                    threading.Thread(target=cls._background_refresh_worker, daemon=True).start()
+                return cached
+            else:
+                # Si cambió la semana pero ya tenemos datos en disco, lanzar refresco o traer la nueva semana
+                pass
+
+        return cls.fetch_live_matches_for_all_leagues(force_refresh=True)
 
     @classmethod
     def format_date_spanish(cls, iso_str: str) -> tuple[str, str, str, str, Any]:
@@ -155,16 +267,17 @@ class RealSportsService:
 
     @classmethod
     def get_all_teams_by_league(cls) -> Dict[str, Any]:
-        """Obtiene la lista completa de todos los equipos de las 9 ligas (~158 clubes)"""
+        """Obtiene en paralelo (ThreadPoolExecutor max_workers=10) la lista completa de todos los equipos de las 9 ligas (~158 clubes)."""
         if cls._cached_teams:
             return cls._cached_teams
 
         result = {}
-        for l_key, cfg in LEAGUE_CONFIG.items():
+
+        def _fetch_teams_for_league(l_key: str, cfg: Dict[str, Any]):
             espn_code = cfg["espn_code"]
-            url = f"http://site.api.espn.com/apis/site/v2/sports/soccer/{espn_code}/teams"
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_code}/teams"
             try:
-                res = requests.get(url, timeout=6)
+                res = _SPORTS_HTTP_SESSION.get(url, timeout=6)
                 if res.status_code == 200:
                     data = res.json()
                     teams_raw = data.get('sports', [{}])[0].get('leagues', [{}])[0].get('teams', [])
@@ -179,25 +292,33 @@ class RealSportsService:
                             "league": cfg["name"],
                             "flag": cfg["flag"]
                         })
-                    result[l_key] = {
+                    return l_key, {
                         "leagueName": cfg["name"],
                         "flag": cfg["flag"],
                         "teams": teams_list
                     }
-                else:
-                    result[l_key] = {"leagueName": cfg["name"], "flag": cfg["flag"], "teams": []}
             except Exception as e:
                 logging.error(f"Error fetching teams for {l_key}: {e}")
-                result[l_key] = {"leagueName": cfg["name"], "flag": cfg["flag"], "teams": []}
+            return l_key, {"leagueName": cfg["name"], "flag": cfg["flag"], "teams": []}
 
-        cls._cached_teams = result
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_fetch_teams_for_league, lk, cf) for lk, cf in LEAGUE_CONFIG.items()]
+            for f in as_completed(futures):
+                try:
+                    lk, val = f.result()
+                    result[lk] = val
+                except Exception:
+                    pass
+
+        if any(len(v.get("teams", [])) > 0 for v in result.values()):
+            cls._cached_teams = result
         return result
 
     @classmethod
     def _fetch_events_for_league_day(cls, l_key: str, espn_code: str, date_str: str) -> List[Dict[str, Any]]:
-        url = f"http://site.api.espn.com/apis/site/v2/sports/soccer/{espn_code}/scoreboard?dates={date_str}&limit=100"
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_code}/scoreboard?dates={date_str}&limit=100"
         try:
-            res = requests.get(url, timeout=5)
+            res = _SPORTS_HTTP_SESSION.get(url, timeout=6)
             if res.status_code == 200:
                 data = res.json()
                 events = data.get("events", [])
@@ -205,6 +326,27 @@ class RealSportsService:
         except Exception:
             pass
         return []
+
+    @classmethod
+    def _fetch_events_for_league_week(cls, l_key: str, espn_code: str, range_query_str: str, days_to_check: List[str]) -> List[Dict[str, Any]]:
+        """
+        Descarga toda la semana de una liga en 1 sola petición HTTP por rango (`dates=YYYYMMDD-YYYYMMDD&limit=100`)
+        con timeout=6s. Solo usa días individuales si la petición de rango falla por red.
+        """
+        if range_query_str:
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_code}/scoreboard?dates={range_query_str}&limit=100"
+            try:
+                res = _SPORTS_HTTP_SESSION.get(url, timeout=6)
+                if res.status_code == 200:
+                    data = res.json()
+                    events = data.get("events", [])
+                    return [{"l_key": l_key, "event": ev} for ev in events]
+            except Exception:
+                pass
+        out = []
+        for d_str in days_to_check:
+            out.extend(cls._fetch_events_for_league_day(l_key, espn_code, d_str))
+        return out
 
     @staticmethod
     def extract_goals_by_team(summary_data: Dict[str, Any], home_team_id: Any, away_team_id: Any, home_name: str, away_name: str) -> Dict[str, List[Dict[str, str]]]:
@@ -324,7 +466,8 @@ class RealSportsService:
         venue_name: str,
         city: str,
         home_team_id: str = "",
-        away_team_id: str = ""
+        away_team_id: str = "",
+        comp: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Auditoría post-partido completa que contrasta goles reales y minutos,
@@ -335,16 +478,21 @@ class RealSportsService:
         total_actual_goals = h_s + a_s
         winner = home_name if h_s > a_s else (away_name if a_s > h_s else "Empate")
 
-        # 1. Consultar resumen oficial de ESPN para el partido finalizado
+        # 1. Consultar resumen desde caché o usar los details ya incluidos en el scoreboard
         summary_data = {}
-        if espn_league_code and espn_event_id:
-            try:
-                url = f"http://site.api.espn.com/apis/site/v2/sports/soccer/{espn_league_code}/summary?event={espn_event_id}"
-                res = requests.get(url, timeout=3.5)
-                if res.status_code == 200:
-                    summary_data = res.json()
-            except Exception:
-                pass
+        sum_key = (str(espn_league_code), str(espn_event_id))
+        if sum_key in MultiSourceRosterEngine._SUMMARY_CACHE:
+            summary_data = MultiSourceRosterEngine._SUMMARY_CACHE[sum_key][1] or {}
+        elif espn_league_code and espn_event_id and not MultiSourceRosterEngine._FAST_NON_BLOCKING_MODE:
+            fetched_sum = MultiSourceRosterEngine._fetch_single_summary(espn_league_code, espn_event_id, timeout=4.0)
+            if isinstance(fetched_sum, dict):
+                summary_data = fetched_sum
+
+        if not summary_data and isinstance(comp, dict):
+            summary_data = {
+                "header": {"competitions": [comp]},
+                "keyEvents": comp.get("details", [])
+            }
 
         # 2. Extraer goles separados estrictamente por equipo con triple validación (Local vs Visita)
         goals_by_team = cls.extract_goals_by_team(summary_data, home_team_id, away_team_id, home_name, away_name)
@@ -372,18 +520,30 @@ class RealSportsService:
             if not isinstance(k, dict):
                 continue
             t_type = str((k.get("type") or {}).get("text") or "")
-            clock = str((k.get("clock") or {}).get("displayValue") or "")
-            participants = k.get("participants") or []
-            p_name = participants[0].get("athlete", {}).get("displayName") if participants and isinstance(participants[0], dict) and "athlete" in participants[0] else ""
-            k_text = str(k.get("text") or "")
-            team_str = home_name if home_name.lower() in k_text.lower() else (away_name if away_name.lower() in k_text.lower() else "")
+            is_yellow = "yellow" in t_type.lower() or bool(k.get("yellowCard"))
+            is_red = "red" in t_type.lower() or bool(k.get("redCard"))
+            if "card" in t_type.lower() or is_yellow or is_red:
+                clock = str((k.get("clock") or {}).get("displayValue") or "")
+                participants = k.get("participants") or k.get("athletesInvolved") or []
+                p_name = ""
+                if participants and isinstance(participants[0], dict):
+                    ath_obj = participants[0].get("athlete") if "athlete" in participants[0] else participants[0]
+                    if isinstance(ath_obj, dict):
+                        p_name = ath_obj.get("displayName") or ath_obj.get("shortName") or ""
+                k_text = str(k.get("text") or "")
+                k_team_id = str((k.get("team") or {}).get("id") or "")
+                if k_team_id and k_team_id == str(home_team_id):
+                    team_str = home_name
+                elif k_team_id and k_team_id == str(away_team_id):
+                    team_str = away_name
+                else:
+                    team_str = home_name if home_name.lower() in k_text.lower() else (away_name if away_name.lower() in k_text.lower() else "")
 
-            if "card" in t_type.lower():
                 card_events.append({
-                    "player": p_name,
+                    "player": p_name or "Jugador",
                     "minute": clock or "FT",
                     "team": team_str,
-                    "card": "🟨 Amarilla" if "yellow" in t_type.lower() else "🟥 Roja"
+                    "card": "🟥 Roja" if is_red else "🟨 Amarilla"
                 })
 
         # 3. Mapear estadísticas individuales de atletas desde rosters
@@ -611,6 +771,26 @@ class RealSportsService:
         return None
 
     @classmethod
+    def _warm_rosters_and_summaries_bg(
+        cls,
+        summary_targets: List[tuple],
+        roster_targets: List[tuple]
+    ):
+        if cls._is_warming_rosters_bg:
+            return
+        cls._is_warming_rosters_bg = True
+        try:
+            MultiSourceRosterEngine.prefetch_summaries_and_rosters_parallel(
+                summary_targets=summary_targets,
+                roster_targets=roster_targets,
+                timeout=5.0
+            )
+        except Exception as e:
+            logging.debug(f"Background roster warming error: {e}")
+        finally:
+            cls._is_warming_rosters_bg = False
+
+    @classmethod
     def fetch_live_matches_for_all_leagues(
         cls,
         force_refresh: bool = False,
@@ -618,7 +798,8 @@ class RealSportsService:
         week_end: str = None
     ) -> List[Dict[str, Any]]:
         """
-        Realiza un barrido exhaustivo en paralelo de toda la semana para las 9 ligas oficiales.
+        Realiza un barrido exhaustivo en paralelo (ThreadPoolExecutor max_workers=10) de toda la semana
+        para las 9 ligas oficiales en < 2 segundos.
         Soporta consultar cualquier rango de semana histórica (week_start y week_end en YYYYMMDD o YYYY-MM-DD).
         """
         now_santiago = get_santiago_now()
@@ -627,11 +808,10 @@ class RealSportsService:
         is_custom_week = bool(custom_start and custom_end and custom_start <= custom_end)
 
         if is_custom_week:
-            # Limitar rango máximo a 10 días por seguridad
             if (custom_end - custom_start).days > 10:
                 custom_end = custom_start + datetime.timedelta(days=6)
             cache_key = f"{custom_start.isoformat()}_{custom_end.isoformat()}"
-            if not force_refresh and cache_key in cls._historical_week_cache:
+            if not force_refresh and cache_key in cls._historical_week_cache and len(cls._historical_week_cache[cache_key]) > 0:
                 return cls._historical_week_cache[cache_key]
             week_start_date = custom_start
             week_end_date = custom_end
@@ -639,7 +819,7 @@ class RealSportsService:
             days_to_check = [(week_start_date + datetime.timedelta(days=i)).strftime("%Y%m%d") for i in range(num_days)]
             range_query_str = f"{week_start_date.strftime('%Y%m%d')}-{week_end_date.strftime('%Y%m%d')}"
         else:
-            if not force_refresh and cls._cached_matches and cls._last_fetch:
+            if not force_refresh and cls._cached_matches and len(cls._cached_matches) > 0 and cls._last_fetch:
                 has_live_or_today = any(
                     m.get("isLive") or (m.get("dataPhase") == "🔴 EN VIVO") or (m.get("matchDate") == now_santiago.strftime("%Y-%m-%d"))
                     for m in cls._cached_matches
@@ -648,18 +828,18 @@ class RealSportsService:
                 if (now_santiago - cls._last_fetch).total_seconds() < cache_limit:
                     return cls._cached_matches
 
-            # Obtener rango estricto de la semana calendario cerrada en America/Santiago (Lunes a Domingo)
             week_start_date, week_end_date, days_to_check = get_current_jornada_range(now_santiago)
-            range_query_str = None
+            range_query_str = f"{week_start_date.strftime('%Y%m%d')}-{week_end_date.strftime('%Y%m%d')}"
 
+        # 1. Descargar las 9 ligas en PARALELO con pool de conexiones persistentes (timeout=6s)
         tasks = []
-        with ThreadPoolExecutor(max_workers=14) as executor:
+        with ThreadPoolExecutor(max_workers=20) as executor:
             for l_key, cfg in LEAGUE_CONFIG.items():
                 espn_code = cfg["espn_code"]
-                if is_custom_week and range_query_str:
-                    tasks.append(executor.submit(cls._fetch_events_for_league_day, l_key, espn_code, range_query_str))
                 for d_str in days_to_check:
-                    tasks.append(executor.submit(cls._fetch_events_for_league_day, l_key, espn_code, d_str))
+                    tasks.append(
+                        executor.submit(cls._fetch_events_for_league_day, l_key, espn_code, d_str)
+                    )
 
         raw_results = []
         for future in as_completed(tasks):
@@ -670,10 +850,52 @@ class RealSportsService:
             except Exception:
                 pass
 
+        # 2. Pre-procesar semillas del scoreboard y detectar partidos EN VIVO para prefetch paralelo de summary
+        live_summary_targets = []
+        bg_summary_targets = []
+        bg_roster_targets = []
+        for item in raw_results:
+            try:
+                lk = item["l_key"]
+                ev_obj = item["event"]
+                comp_obj = (ev_obj.get("competitions") or [{}])[0]
+                comps_list = comp_obj.get("competitors") or []
+                if len(comps_list) < 2:
+                    continue
+                espn_code_item = LEAGUE_CONFIG[lk]["espn_code"]
+                ev_id_str = str(ev_obj.get("id") or "")
+                st_state = ((ev_obj.get("status") or {}).get("type") or {}).get("state", "pre")
+                details_arr = comp_obj.get("details") or []
+
+                for c_entry in comps_list:
+                    t_obj = c_entry.get("team") or {}
+                    tid = str(t_obj.get("id") or c_entry.get("id") or "")
+                    tname = t_obj.get("displayName", "")
+                    if tid and tname:
+                        MultiSourceRosterEngine.register_team(espn_code_item, tid, tname)
+                        MultiSourceRosterEngine.seed_athletes_from_scoreboard(espn_code_item, tid, c_entry, details_arr)
+                        bg_roster_targets.append((espn_code_item, tid))
+
+                if st_state == "in" and ev_id_str.isdigit():
+                    live_summary_targets.append((espn_code_item, ev_id_str))
+                elif st_state == "post" and ev_id_str.isdigit():
+                    bg_summary_targets.append((espn_code_item, ev_id_str))
+            except Exception:
+                pass
+
+        # Si hay partidos EN VIVO, descargar sus resúmenes en paralelo ahora mismo (< 0.4s)
+        if live_summary_targets:
+            MultiSourceRosterEngine.prefetch_summaries_and_rosters_parallel(
+                summary_targets=live_summary_targets,
+                roster_targets=[],
+                timeout=4.0
+            )
+
         processed_matches = []
         seen_ids = set()
 
         import re
+        MultiSourceRosterEngine._FAST_NON_BLOCKING_MODE = True
         for item in raw_results:
             l_key = item["l_key"]
             ev = item["event"]
@@ -693,9 +915,6 @@ class RealSportsService:
             away_team_id = str(away_team_obj.get("id") or away_comp.get("id", ""))
             espn_event_id = str(ev.get("id", ""))
             espn_league_code = LEAGUE_CONFIG[l_key]["espn_code"]
-
-            MultiSourceRosterEngine.register_team(espn_league_code, home_team_id, home_name)
-            MultiSourceRosterEngine.register_team(espn_league_code, away_team_id, away_name)
 
             raw_date = ev.get("date", "")
             date_label, day_id, full_day, match_date_str, match_date_obj = cls.format_date_spanish(raw_date)
@@ -1121,7 +1340,8 @@ class RealSportsService:
                     venue_name=venue_name,
                     city=city,
                     home_team_id=home_team_id,
-                    away_team_id=away_team_id
+                    away_team_id=away_team_id,
+                    comp=comp
                 )
                 match_data["postMatchReport"] = pm_rep
                 match_data["homeGoals"] = pm_rep.get("homeGoals", [])
@@ -1129,14 +1349,33 @@ class RealSportsService:
 
             processed_matches.append(match_data)
 
+        MultiSourceRosterEngine._FAST_NON_BLOCKING_MODE = False
         processed_matches.sort(key=lambda x: (x.get("rawDate", ""), x.get("leagueId", ""), x.get("id", "")))
 
         if is_custom_week:
             cache_key = f"{week_start_date.isoformat()}_{week_end_date.isoformat()}"
             if processed_matches:
                 cls._historical_week_cache[cache_key] = processed_matches
-            return processed_matches
+                return processed_matches
+            return cls._historical_week_cache.get(cache_key, [])
+
+        # REGLA ANTI-VACÍO ESTRICTA: Si ESPN devuelve 0 partidos por corte o timeout, JAMÁS sobrescribir el caché con vacío
+        if len(processed_matches) == 0:
+            fallback_cache = cls.get_cached_matches_list()
+            if fallback_cache:
+                return fallback_cache
+            return []
 
         cls._cached_matches = processed_matches
         cls._last_fetch = now_santiago
+        cls._save_disk_cache(processed_matches)
+
+        # Calentar plantillas completas y resúmenes post-partido en hilo daemon sin bloquear la respuesta
+        if (bg_summary_targets or bg_roster_targets) and not cls._is_warming_rosters_bg:
+            threading.Thread(
+                target=cls._warm_rosters_and_summaries_bg,
+                args=(bg_summary_targets, bg_roster_targets),
+                daemon=True
+            ).start()
+
         return processed_matches

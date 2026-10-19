@@ -19,10 +19,18 @@ import time
 import re
 import unicodedata
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Optional, Tuple
 import requests
+from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
+
+# Sesión HTTP persistente con pool de conexiones de alta velocidad
+_ROSTER_HTTP_SESSION = requests.Session()
+_adapter = HTTPAdapter(pool_connections=25, pool_maxsize=25)
+_ROSTER_HTTP_SESSION.mount("https://", _adapter)
+_ROSTER_HTTP_SESSION.mount("http://", _adapter)
 
 # Normalización de nombres de equipos
 def norm_str(s: str) -> str:
@@ -49,9 +57,20 @@ class MultiSourceRosterEngine:
     _TEAM_REGISTRY: Dict[str, Tuple[str, str, str]] = {}
     _REGISTRY_INITIALIZED = False
 
-    # Caché dinámico de plantillas en vivo: (league_code, team_id) -> (timestamp, roster_data)
-    _LIVE_ROSTERS_CACHE: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
+    # Caché dinámico de plantillas en vivo: (league_code, team_id, event_id) -> (timestamp, roster_data)
+    _LIVE_ROSTERS_CACHE: Dict[Tuple[str, str, str], Tuple[float, Dict[str, Any]]] = {}
+    # Caché de resúmenes de partidos: (league_code, event_id) -> (timestamp, summary_json)
+    _SUMMARY_CACHE: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
+    # Caché de plantillas base por club: (league_code, team_id) -> (timestamp, athletes_list)
+    _TEAM_BASE_ROSTER_CACHE: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+    # Semilla rápida de atletas extraídos directamente del scoreboard de ESPN: (league_code, team_id) -> athletes_list
+    _SCOREBOARD_ATHLETES_SEED: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+
     CACHE_TTL_SECONDS = 900  # 15 minutos en RAM
+    BASE_ROSTER_TTL_SECONDS = 1800  # 30 minutos para plantillas base
+
+    # Modo de grilla ultra-rápida: evita llamadas HTTP secuenciales bloqueantes por partido
+    _FAST_NON_BLOCKING_MODE = False
 
     # Conjunto dinámico de porteros conocidos extraídos en vivo de ESPN
     _LIVE_GOALKEEPERS_SET = set()
@@ -63,22 +82,164 @@ class MultiSourceRosterEngine:
             return
         key = norm_str(display_name)
         cls._TEAM_REGISTRY[key] = (league_code, str(team_id), display_name)
-        # Registrar también variantes del nombre
         clean_name = display_name.lower().replace("fc", "").replace("cf", "").strip()
         cls._TEAM_REGISTRY[norm_str(clean_name)] = (league_code, str(team_id), display_name)
 
     @classmethod
+    def seed_athletes_from_scoreboard(
+        cls,
+        league_code: str,
+        team_id: str,
+        competitor_obj: Dict[str, Any],
+        details_list: Optional[List[Dict[str, Any]]] = None
+    ):
+        """
+        Extrae atletas reales presentes en el nodo `scoreboard` (leaders, probables y details)
+        sin necesidad de peticiones HTTP adicionales.
+        """
+        if not league_code or not team_id or not isinstance(competitor_obj, dict):
+            return
+        seed_key = (str(league_code), str(team_id))
+        existing = list(cls._SCOREBOARD_ATHLETES_SEED.get(seed_key, []))
+        seen_names = {norm_player_name(a.get("displayName", "")) for a in existing if a.get("displayName")}
+
+        try:
+            for leader_cat in (competitor_obj.get("leaders") or []):
+                if not isinstance(leader_cat, dict):
+                    continue
+                for l_entry in (leader_cat.get("leaders") or []):
+                    ath = (l_entry.get("athlete") or {}) if isinstance(l_entry, dict) else {}
+                    name = ath.get("displayName") or ath.get("fullName") or ath.get("shortName")
+                    if not name or norm_player_name(name) in seen_names:
+                        continue
+                    pos_abbr = ((ath.get("position") or {}).get("abbreviation") or "F").upper()
+                    seen_names.add(norm_player_name(name))
+                    existing.append({
+                        "displayName": name,
+                        "position": {"abbreviation": pos_abbr},
+                        "injuries": []
+                    })
+
+            for detail in (details_list or []):
+                if not isinstance(detail, dict):
+                    continue
+                d_team_id = str((detail.get("team") or {}).get("id") or "")
+                if d_team_id != str(team_id):
+                    continue
+                is_goal = bool(detail.get("scoringPlay"))
+                is_card = bool(detail.get("yellowCard") or detail.get("redCard"))
+                for ath_in in (detail.get("athletesInvolved") or []):
+                    if not isinstance(ath_in, dict):
+                        continue
+                    name = ath_in.get("displayName") or ath_in.get("shortName")
+                    if not name or norm_player_name(name) in seen_names:
+                        continue
+                    pos_abbr = ((ath_in.get("position") or {}).get("abbreviation") or ("F" if is_goal else ("D" if is_card else "M"))).upper()
+                    seen_names.add(norm_player_name(name))
+                    existing.append({
+                        "displayName": name,
+                        "position": {"abbreviation": pos_abbr},
+                        "injuries": []
+                    })
+        except Exception:
+            pass
+
+        if existing:
+            cls._SCOREBOARD_ATHLETES_SEED[seed_key] = existing
+
+    @classmethod
+    def _fetch_single_summary(cls, l_code: str, event_id: str, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
+        if not l_code or not event_id:
+            return None
+        sum_cache_key = (str(l_code), str(event_id))
+        if sum_cache_key in cls._SUMMARY_CACHE:
+            s_ts, s_cached = cls._SUMMARY_CACHE[sum_cache_key]
+            if (time.time() - s_ts) < 45:
+                return s_cached
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={event_id}"
+        try:
+            res = _ROSTER_HTTP_SESSION.get(url, timeout=timeout)
+            if res.status_code == 200:
+                data = res.json()
+                cls._SUMMARY_CACHE[sum_cache_key] = (time.time(), data)
+                return data
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def _fetch_single_team_roster(cls, l_code: str, t_id: str, timeout: float = 5.0) -> List[Dict[str, Any]]:
+        if not l_code or not t_id:
+            return []
+        base_key = (str(l_code), str(t_id))
+        if base_key in cls._TEAM_BASE_ROSTER_CACHE:
+            b_ts, b_athletes = cls._TEAM_BASE_ROSTER_CACHE[base_key]
+            if (time.time() - b_ts) < cls.BASE_ROSTER_TTL_SECONDS and b_athletes:
+                return b_athletes
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/teams/{t_id}/roster"
+        try:
+            res = _ROSTER_HTTP_SESSION.get(url, timeout=timeout)
+            if res.status_code == 200:
+                athletes = res.json().get("athletes", [])
+                if athletes:
+                    cls._TEAM_BASE_ROSTER_CACHE[base_key] = (time.time(), athletes)
+                    # Invalidar entradas rápidas sin plantilla completa para este equipo
+                    keys_to_clear = [k for k in list(cls._LIVE_ROSTERS_CACHE.keys()) if k[0] == str(l_code) and k[1] == str(t_id)]
+                    for k in keys_to_clear:
+                        cls._LIVE_ROSTERS_CACHE.pop(k, None)
+                return athletes
+        except Exception:
+            pass
+        return []
+
+    @classmethod
+    def prefetch_summaries_and_rosters_parallel(
+        cls,
+        summary_targets: List[Tuple[str, str]],
+        roster_targets: List[Tuple[str, str]],
+        timeout: float = 5.0
+    ):
+        """
+        Descarga en paralelo (ThreadPoolExecutor max_workers=10) resúmenes de partidos
+        y plantillas de equipos sin bloquear secuencialmente.
+        """
+        unique_summaries = list({(str(lc), str(eid)) for lc, eid in (summary_targets or []) if lc and eid and str(eid).isdigit()})
+        unique_rosters = list({(str(lc), str(tid)) for lc, tid in (roster_targets or []) if lc and tid})
+
+        missing_summaries = [
+            (lc, eid) for lc, eid in unique_summaries
+            if (lc, eid) not in cls._SUMMARY_CACHE or (time.time() - cls._SUMMARY_CACHE[(lc, eid)][0]) >= 45
+        ]
+        missing_rosters = [
+            (lc, tid) for lc, tid in unique_rosters
+            if (lc, tid) not in cls._TEAM_BASE_ROSTER_CACHE or (time.time() - cls._TEAM_BASE_ROSTER_CACHE[(lc, tid)][0]) >= cls.BASE_ROSTER_TTL_SECONDS
+        ]
+
+        if not missing_summaries and not missing_rosters:
+            return
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for lc, eid in missing_summaries:
+                futures.append(executor.submit(cls._fetch_single_summary, lc, eid, timeout))
+            for lc, tid in missing_rosters:
+                futures.append(executor.submit(cls._fetch_single_team_roster, lc, tid, timeout))
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except Exception:
+                    pass
+
+    @classmethod
     def initialize_registry_for_leagues(cls, league_configs: Dict[str, Dict[str, Any]]):
-        """Inicializa dinámicamente el catálogo de los 158 equipos desde ESPN."""
+        """Inicializa dinámicamente en paralelo el catálogo de los 158 equipos desde ESPN."""
         if cls._REGISTRY_INITIALIZED and len(cls._TEAM_REGISTRY) >= 120:
             return
-        for l_key, cfg in league_configs.items():
-            code = cfg.get("espn_code")
-            if not code:
-                continue
+
+        def _fetch_league_teams(code: str):
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{code}/teams"
             try:
-                res = requests.get(url, timeout=4)
+                res = _ROSTER_HTTP_SESSION.get(url, timeout=5)
                 if res.status_code == 200:
                     data = res.json()
                     teams = data.get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
@@ -87,6 +248,15 @@ class MultiSourceRosterEngine:
                         cls.register_team(code, tm.get("id", ""), tm.get("displayName", ""))
             except Exception as e:
                 logger.debug(f"Error initializing league {code} teams: {e}")
+
+        codes = [cfg.get("espn_code") for cfg in league_configs.values() if cfg.get("espn_code")]
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_fetch_league_teams, c) for c in codes]
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except Exception:
+                    pass
         cls._REGISTRY_INITIALIZED = True
 
     @classmethod
@@ -102,11 +272,10 @@ class MultiSourceRosterEngine:
         for r_k, r_v in cls._TEAM_REGISTRY.items():
             if r_k in key or key in r_k:
                 return r_v
-        # Si aún no está mapeado y se proporcionó league_code, consultar equipos de esa liga
-        if league_code:
+        if league_code and not cls._FAST_NON_BLOCKING_MODE:
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/teams"
             try:
-                res = requests.get(url, timeout=4)
+                res = _ROSTER_HTTP_SESSION.get(url, timeout=4)
                 if res.status_code == 200:
                     teams = res.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
                     for t in teams:
@@ -127,30 +296,36 @@ class MultiSourceRosterEngine:
     def get_live_roster(cls, team_name: str, league_code: str = "", team_id: str = "", event_id: str = "") -> Dict[str, Any]:
         """
         Descarga y analiza en vivo la plantilla oficial actual desde la API de ESPN.
-        Cero diccionarios estáticos, cero jugadores inventados.
+        Usa caché multinivel y respeta `_FAST_NON_BLOCKING_MODE` durante el armado rápido de grilla.
         """
         l_code, t_id, d_name = cls.resolve_team(team_name, league_code, team_id)
-        # El cache_key debe incluir event_id si está presente para no mezclar alineaciones de partidos distintos
-        cache_key = (l_code, t_id, str(event_id or ""))
+        cache_key = (str(l_code), str(t_id), str(event_id or ""))
 
-        # TTL de 15s si hay event_id (partido en curso o próximo), o TTL general si es plantilla base
-        ttl = 15 if event_id else cls.CACHE_TTL_SECONDS
+        ttl = 45 if event_id else cls.CACHE_TTL_SECONDS
         if cache_key in cls._LIVE_ROSTERS_CACHE:
             ts, cached_roster = cls._LIVE_ROSTERS_CACHE[cache_key]
             if (time.time() - ts) < ttl:
                 return cached_roster
 
-        # 1. Si hay event_id, consultar summary oficial de ESPN para verificar alineaciones en vivo
+        # Si no hay event_id específico o si hay caché base sin event_id en modo rápido
+        base_cache_key = (str(l_code), str(t_id), "")
+        if cls._FAST_NON_BLOCKING_MODE and base_cache_key in cls._LIVE_ROSTERS_CACHE:
+            sum_cache_key_check = (str(l_code), str(event_id or "").strip())
+            if sum_cache_key_check not in cls._SUMMARY_CACHE:
+                ts_b, cached_base = cls._LIVE_ROSTERS_CACHE[base_cache_key]
+                if (time.time() - ts_b) < cls.CACHE_TTL_SECONDS:
+                    return cached_base
+
+        # 1. Si hay event_id, consultar summary oficial de ESPN (desde caché o red si no está en modo no-bloqueante)
         has_official_lineup = False
         official_starters = []
         official_bench = []
 
         real_event_id = str(event_id or "").strip()
-        # Si event_id no es numérico (por ejemplo un slug interno), resolver el event_id numérico de ESPN
-        if real_event_id and not real_event_id.isdigit():
+        if real_event_id and not real_event_id.isdigit() and not cls._FAST_NON_BLOCKING_MODE:
             try:
                 sc_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/scoreboard"
-                sc_res = requests.get(sc_url, timeout=3.5)
+                sc_res = _ROSTER_HTTP_SESSION.get(sc_url, timeout=3.5)
                 if sc_res.status_code == 200:
                     for ev_item in sc_res.json().get("events", []):
                         ev_num_id = str(ev_item.get("id", ""))
@@ -164,20 +339,14 @@ class MultiSourceRosterEngine:
 
         if real_event_id and real_event_id.isdigit():
             try:
-                sum_cache_key = (l_code, real_event_id)
+                sum_cache_key = (str(l_code), real_event_id)
                 sum_data = None
-                if not hasattr(cls, "_SUMMARY_CACHE"):
-                    cls._SUMMARY_CACHE = {}
                 if sum_cache_key in cls._SUMMARY_CACHE:
                     s_ts, s_cached = cls._SUMMARY_CACHE[sum_cache_key]
-                    if (time.time() - s_ts) < 15:
+                    if (time.time() - s_ts) < 120:
                         sum_data = s_cached
-                if sum_data is None:
-                    sum_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/summary?event={real_event_id}"
-                    res_sum = requests.get(sum_url, timeout=4.5)
-                    if res_sum.status_code == 200:
-                        sum_data = res_sum.json()
-                        cls._SUMMARY_CACHE[sum_cache_key] = (time.time(), sum_data)
+                if sum_data is None and not cls._FAST_NON_BLOCKING_MODE:
+                    sum_data = cls._fetch_single_summary(l_code, real_event_id, timeout=4.5)
                 if isinstance(sum_data, dict):
                     for r_entry in sum_data.get("rosters", []):
                         r_team = r_entry.get("team", {})
@@ -215,16 +384,16 @@ class MultiSourceRosterEngine:
             except Exception as e:
                 logger.debug(f"Error fetching summary for event {real_event_id}: {e}")
 
-        # 2. Si no hay alineación oficial publicada aún, consultar /teams/{id}/roster de ESPN
+        # 2. Si no hay alineación oficial publicada aún, usar caché de plantilla base o semilla del scoreboard
         raw_athletes = []
         if not has_official_lineup and t_id:
-            roster_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/teams/{t_id}/roster"
-            try:
-                res_rost = requests.get(roster_url, timeout=5)
-                if res_rost.status_code == 200:
-                    raw_athletes = res_rost.json().get("athletes", [])
-            except Exception as e:
-                logger.warning(f"Error fetching ESPN live roster for {team_name} (ID {t_id}): {e}")
+            base_key = (str(l_code), str(t_id))
+            if base_key in cls._TEAM_BASE_ROSTER_CACHE:
+                raw_athletes = cls._TEAM_BASE_ROSTER_CACHE[base_key][1]
+            elif not cls._FAST_NON_BLOCKING_MODE:
+                raw_athletes = cls._fetch_single_team_roster(l_code, t_id, timeout=4.5)
+            if not raw_athletes and base_key in cls._SCOREBOARD_ATHLETES_SEED:
+                raw_athletes = cls._SCOREBOARD_ATHLETES_SEED[base_key]
 
         # Clasificación estricta de atletas (CERO PORTEROS en ataque, y separación Titulares vs Banca)
         gks = []
@@ -333,9 +502,9 @@ class MultiSourceRosterEngine:
 
         # Goleadores Reales (100% Forwards y Midfielders atacantes, CERO PORTEROS, 100% Titulares si hay alineación)
         scorers = []
-        p1 = fws[0] if fws else (mfs[0] if mfs else "Atacante Titular")
-        p2 = fws[1] if len(fws) > 1 else (mfs[0] if (len(fws) <= 1 and mfs and mfs[0] != p1) else (mfs[1] if len(mfs) > 1 else "Segundo Atacante"))
-        p3 = fws[2] if len(fws) > 2 else (mfs[1] if (mfs and mfs[1] not in [p1, p2]) else (mfs[0] if mfs and mfs[0] not in [p1, p2] else "Organizador Ofensivo"))
+        p1 = fws[0] if len(fws) > 0 else (mfs[0] if len(mfs) > 0 else f"Delantero de {team_name}")
+        p2 = fws[1] if len(fws) > 1 else (mfs[0] if (len(fws) <= 1 and len(mfs) > 0 and mfs[0] != p1) else (mfs[1] if len(mfs) > 1 else f"Extremo de {team_name}"))
+        p3 = fws[2] if len(fws) > 2 else (mfs[1] if (len(mfs) > 1 and mfs[1] not in [p1, p2]) else (mfs[0] if (len(mfs) > 0 and mfs[0] not in [p1, p2]) else f"Mediocampista de {team_name}"))
 
         p1_inherited = bool(benched_star)
         p1_role = f"Pateador N°1 Titular de {team_name} (Hereda Penales)" if p1_inherited else f"Pateador N°1 de {team_name} (Penales)"
@@ -454,8 +623,10 @@ class MultiSourceRosterEngine:
             "bajas": bajas
         }
 
-        # Guardar en caché dinámico de RAM
-        cls._LIVE_ROSTERS_CACHE[cache_key] = (time.time(), roster_data)
+        now_ts = time.time()
+        cls._LIVE_ROSTERS_CACHE[cache_key] = (now_ts, roster_data)
+        if not has_official_lineup:
+            cls._LIVE_ROSTERS_CACHE[(str(l_code), str(t_id), "")] = (now_ts, roster_data)
         return roster_data
 
     # ---------------------------------------------------------------------

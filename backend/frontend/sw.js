@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-betano_engine_v12';
+const CACHE_NAME = 'sport-agent-v-turbo_speed_v13';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=betano_engine_v12',
+  '/app.js?v=turbo_speed_v13',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'

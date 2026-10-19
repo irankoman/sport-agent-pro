@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=betano_engine_v12')
+        navigator.serviceWorker.register('/sw.js?v=turbo_speed_v13')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=betano_engine_v12')
+            navigator.serviceWorker.register('/service-worker.js?v=turbo_speed_v13')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -643,6 +643,36 @@
       return [];
     };
 
+    const STORAGE_KEY_LAST_VALID_MATCHES = 'sport_agent_last_valid_matches_v1';
+
+    const loadCachedMatchesInstant = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_LAST_VALID_MATCHES);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.matches) ? parsed.matches : []);
+        if (list.length > 0) {
+          const activeRange = getActiveJornadaRange();
+          const firstWeekStart = list[0]?.weekStartDate || '';
+          if (!firstWeekStart || !activeRange?.startISO || firstWeekStart === activeRange.startISO) {
+            return list;
+          }
+        }
+      } catch (e) {}
+      return [];
+    };
+
+    const saveCachedMatchesInstant = (list) => {
+      try {
+        if (Array.isArray(list) && list.length > 0) {
+          localStorage.setItem(STORAGE_KEY_LAST_VALID_MATCHES, JSON.stringify({
+            updatedAt: new Date().toISOString(),
+            matches: list
+          }));
+        }
+      } catch (e) {}
+    };
+
     // Helper para detectar partidos finalizados de forma inteligente
     const isFinishedMatch = (m) => {
       if (!m) return false;
@@ -655,8 +685,10 @@
     };
 
     function App() {
-      const [matches, setMatches] = useState([]);
-      const [isLoading, setIsLoading] = useState(true);
+      const [matches, setMatches] = useState(loadCachedMatchesInstant);
+      const [isLoading, setIsLoading] = useState(() => loadCachedMatchesInstant().length === 0);
+      const [isSyncingServer, setIsSyncingServer] = useState(false);
+      const [syncRetryAttempt, setSyncRetryAttempt] = useState(0);
       const [lastUpdated, setLastUpdated] = useState('');
       
       const [selectedDay, setSelectedDay] = useState('all_week');
@@ -1379,42 +1411,63 @@
         } catch (e) {}
       }, [matches, vipTeams]);
 
-      // Cargar partidos reales y ejecutar ciclo de sincronización multifuente
-      const loadRealMatches = async (force = false, isBackground = false) => {
-        // Solo mostrar spinner en carga inicial o cuando el usuario presiona "Actualizar" manualmente
-        if (!isBackground) {
+      // Cargar partidos reales con caché instantáneo, regla anti-vacío y reintento automático (Cold Start)
+      const loadRealMatches = async (force = false, isBackground = false, retryCount = 0) => {
+        if (!isBackground && matches.length === 0) {
           setIsLoading(true);
         }
+        setIsSyncingServer(true);
+
+        let receivedValidData = false;
         try {
-          if (force) {
-            await fetch('/api/sync/trigger', { method: 'POST' });
+          if (force && retryCount === 0) {
+            fetch('/api/sync/trigger', { method: 'POST' }).catch(() => {});
           }
-          const res = await fetch(`/api/real-matches?force_refresh=${force}`);
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const timeoutId = controller ? setTimeout(() => controller.abort(), 14000) : null;
+          const res = await fetch(
+            `/api/real-matches?force_refresh=${force}`,
+            controller ? { signal: controller.signal } : undefined
+          );
+          if (timeoutId) clearTimeout(timeoutId);
+
           if (res.ok) {
             const data = await res.json();
-            if (data && data.length > 0) {
+            if (Array.isArray(data) && data.length > 0) {
+              receivedValidData = true;
               setMatches(data);
+              saveCachedMatchesInstant(data);
+              setIsSyncingServer(false);
+              setSyncRetryAttempt(0);
+              setIsLoading(false);
               setLastUpdated(new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
 
               const currentSelectedId = selectedMatchIdRef.current;
               const isModalOpen = showDetailModalRef.current;
 
-              // Si ya hay un partido seleccionado o el modal está abierto, ACTUALIZAR la referencia viva SIN reiniciar a data[0]
               if (currentSelectedId) {
                 const refreshedMatch = data.find(m => m.id === currentSelectedId);
                 if (refreshedMatch) {
                   lastInspectedMatchRef.current = refreshedMatch;
                 }
               } else if (!isModalOpen && data.length > 0) {
-                // Solo si el usuario nunca seleccionó nada y el modal está cerrado
                 initMatchSelection(data[0]);
               }
             }
           }
         } catch (e) {
-          console.error("Error al cargar partidos:", e);
-        } finally {
-          if (!isBackground) {
+          console.warn("Sincronizando con servidor (intento " + (retryCount + 1) + "):", e);
+        }
+
+        if (!receivedValidData) {
+          if (retryCount < 3) {
+            setSyncRetryAttempt(retryCount + 1);
+            setIsSyncingServer(true);
+            setTimeout(() => {
+              loadRealMatches(force, isBackground, retryCount + 1);
+            }, 3000);
+          } else {
+            setIsSyncingServer(false);
             setIsLoading(false);
           }
         }
@@ -1434,10 +1487,25 @@
       };
 
       useEffect(() => {
-        loadRealMatches(false, false);
+        const cachedInitial = loadCachedMatchesInstant();
+        if (cachedInitial.length > 0 && !selectedMatchIdRef.current) {
+          initMatchSelection(cachedInitial[0]);
+        }
+        loadRealMatches(false, cachedInitial.length > 0, 0);
         loadAllTeams();
-        const interval = setInterval(() => loadRealMatches(true, true), 300000);
-        return () => clearInterval(interval);
+
+        // Refresco periódico de cuotas y marcadores cada 5 minutos
+        const interval = setInterval(() => loadRealMatches(true, true, 0), 300000);
+
+        // Keep-alive silencioso cada 4 minutos para evitar que Render duerma el contenedor
+        const pingInterval = setInterval(() => {
+          fetch('/api/ping').catch(() => {});
+        }, 240000);
+
+        return () => {
+          clearInterval(interval);
+          clearInterval(pingInterval);
+        };
       }, []);
 
       const initMatchSelection = (match) => {
@@ -1932,9 +2000,15 @@
                   <span className="text-xs text-amber-300 font-bold bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-sm">
                     <span>🗓️</span> {activeJornada.weekRangeLabel}
                   </span>
-                  <span className="text-xs text-orange-400 font-bold bg-orange-500/10 border border-orange-500/30 px-3 py-1 rounded-lg font-mono">
-                    {filteredMatches.length} partidos encontrados
-                  </span>
+                  {(isLoading || isSyncingServer) && matches.length === 0 ? (
+                    <span className="text-xs text-emerald-300 font-bold bg-emerald-500/15 border border-emerald-500/40 px-3 py-1 rounded-lg font-mono flex items-center gap-1.5 animate-pulse">
+                      <span>⚡ Sincronizando partidos en vivo con el servidor...</span>
+                    </span>
+                  ) : (
+                    <span className="text-xs text-orange-400 font-bold bg-orange-500/10 border border-orange-500/30 px-3 py-1 rounded-lg font-mono">
+                      {filteredMatches.length} partidos encontrados
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1956,10 +2030,17 @@
                     {filteredMatches.length === 0 ? (
                       <tr>
                         <td colSpan="7" className="py-16 text-center text-slate-500 font-mono">
-                          {isLoading ? (
-                            <div className="flex flex-col items-center gap-2">
-                              <span className="text-xl animate-spin">🔄</span>
-                              <span>Cargando partidos de las 9 ligas en tiempo real...</span>
+                          {(isLoading || isSyncingServer) && matches.length === 0 ? (
+                            <div className="flex flex-col items-center gap-2.5">
+                              <span className="text-2xl animate-spin">⚡</span>
+                              <span className="text-sm font-bold text-emerald-400">
+                                ⚡ Sincronizando partidos en vivo con el servidor...
+                              </span>
+                              {syncRetryAttempt > 0 && (
+                                <span className="text-[11px] text-slate-400">
+                                  Conectando con el motor paralelo de las 9 ligas (reintento automático {syncRetryAttempt}/3)...
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <div>

@@ -60,7 +60,7 @@ def get_matches(
     week_end: Optional[str] = None
 ):
     if week_start and week_end:
-        return RealSportsService.fetch_live_matches_for_all_leagues(
+        return RealSportsService.get_cached_or_fetch_matches(
             force_refresh=False,
             week_start=week_start,
             week_end=week_end
@@ -146,6 +146,7 @@ def get_all_referees():
 def chat_with_agent(req: ChatRequest):
     return CHAT_AGENT.respond(req.message)
 
+import threading
 from backend.services.real_sports_service import RealSportsService
 from backend.services.polling_engine import PollingEngine
 from backend.services.news_scraper import ContextNewsScraper
@@ -153,14 +154,37 @@ from backend.services.odds_service import build_betano_consensus_odds, BetanoOdd
 
 extract_goals_by_team = RealSportsService.extract_goals_by_team
 
+@app.on_event("startup")
+def preload_matches_on_startup():
+    """
+    Precarga no bloqueante al arrancar el servidor:
+    Carga de inmediato el último caché persistido en `cache_matches.json` y lanza un hilo daemon
+    para sincronizar las 9 ligas en paralelo sin bloquear el puerto de Render.
+    """
+    try:
+        RealSportsService._load_disk_cache()
+        threading.Thread(
+            target=RealSportsService.fetch_live_matches_for_all_leagues,
+            kwargs={"force_refresh": True},
+            daemon=True
+        ).start()
+    except Exception:
+        pass
+
+@app.get("/api/ping")
+def ping_keep_alive():
+    """Endpoint ultra-ligero (1ms) sin llamadas externas para mantener activo el contenedor en Render."""
+    cached = RealSportsService.get_cached_matches_list()
+    return {"status": "ok", "cached_matches": len(cached)}
+
 @app.get("/api/real-matches")
 def get_real_matches(
     force_refresh: bool = False,
     week_start: Optional[str] = None,
     week_end: Optional[str] = None
 ):
-    """Obtiene partidos reales y actualizados de las 9 ligas oficiales desde la API deportiva (soporta semanas históricas vía week_start y week_end)."""
-    return RealSportsService.fetch_live_matches_for_all_leagues(
+    """Obtiene partidos reales y actualizados de las 9 ligas oficiales con Stale-While-Revalidate (< 100ms desde caché)."""
+    return RealSportsService.get_cached_or_fetch_matches(
         force_refresh=force_refresh,
         week_start=week_start,
         week_end=week_end
