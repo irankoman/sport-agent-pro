@@ -234,19 +234,24 @@ class DeepStatsEngine:
         }
 
         # =========================================================================
-        # 2. MATRIZ DE CÓRNERS Y GOLES PROBABLES (xG) POR EQUIPO
+        # 2. MATRIZ DE CÓRNERS Y GOLES PROBABLES (xG) POR EQUIPO (SINCRONIZADO CON UNIFIED ODDS)
         # =========================================================================
-        home_corners = round(max(4.5, float(odds_data.get("corners_line", 4.5))) + 1.2 + ((seed % 10) * 0.08), 1)
-        away_corners = round(3.6 + (((seed // 3) % 10) * 0.08), 1)
-        total_corners = round(home_corners + away_corners, 1)
-
-        home_xg = round(1.82 + ((seed % 12) * 0.04), 2)
-        away_xg = round(1.02 + (((seed // 2) % 10) * 0.03), 2)
+        unified = odds_data.get("unifiedOdds") or {}
+        home_xg = round(float(unified.get("lambda_home") or odds_data.get("lambda_home") or (1.55 + ((seed % 10) * 0.04))), 2)
+        away_xg = round(float(unified.get("lambda_away") or odds_data.get("lambda_away") or (1.05 + (((seed // 2) % 8) * 0.03))), 2)
         total_xg = round(home_xg + away_xg, 2)
 
-        over15_prob = min(92, int(round(78 + (total_xg * 3.5))))
-        over25_prob = min(78, int(round(46 + (total_xg * 6.0))))
-        btts_prob = min(74, int(round(44 + (away_xg * 18.0))))
+        home_corners = round(max(4.2, float(unified.get("corners_line") or odds_data.get("corners_line", 4.5))) + 0.9 + (home_xg * 0.35), 1)
+        away_corners = round(max(3.1, 2.8 + (away_xg * 0.85)), 1)
+        total_corners = round(home_corners + away_corners, 1)
+
+        over15_odds = float(unified.get("over_15") or odds_data.get("over_15_odds") or 1.28)
+        over25_odds = float(unified.get("over_25") or odds_data.get("over_goals_odds") or 1.82)
+        btts_yes_odds = float(unified.get("btts_yes") or odds_data.get("btts_yes_odds") or 1.78)
+
+        over15_prob = int(unified.get("prob_over_15") or min(92, int(round(78 + (total_xg * 3.5)))))
+        over25_prob = int(unified.get("prob_over_25") or min(82, int(round(46 + (total_xg * 6.0)))))
+        btts_prob = int(unified.get("prob_btts_yes") or min(78, int(round(44 + (away_xg * 18.0)))))
 
         corners_xg_matrix = {
             "corners": {
@@ -254,8 +259,8 @@ class DeepStatsEngine:
                 "away": away_corners,
                 "total": total_corners,
                 "recommendedLine": f"Más de {int(total_corners - 1)}.5 Córners Totales",
-                "odds": odds_data.get("corners_odds", 1.85),
-                "prob": odds_data.get("corners_prob", 78),
+                "odds": unified.get("corners_odds") or odds_data.get("corners_odds", 1.55),
+                "prob": unified.get("corners_prob") or odds_data.get("corners_prob", 78),
                 "tacticalFactors": [
                     f"Amplitud de bandas en {weather_pitch.get('pitchType', 'estadio')} favorece centros cortados.",
                     f"Bloque defensivo de {away_name} concede rebotes a la línea de fondo ante asedio local."
@@ -265,29 +270,29 @@ class DeepStatsEngine:
                 "home": home_xg,
                 "away": away_xg,
                 "total": total_xg,
-                "dominance": f"Local genera el {int(round(home_xg / total_xg * 100))}% de las ocasiones esperadas"
+                "dominance": f"Local genera el {int(round(home_xg / max(0.5, total_xg) * 100))}% de las ocasiones esperadas"
             },
             "recommendedMarkets": [
                 {
                     "market": "Más de 1.5 Goles Totales",
-                    "odds": 1.25,
+                    "odds": over15_odds,
                     "prob": over15_prob,
                     "badge": "🛡️ Alta Certeza (+EV)",
-                    "reason": f"xG conjunto de {total_xg} supera holgadamente la línea mínima de 2 anotaciones."
+                    "reason": f"xG conjunto de {total_xg} ({home_name} {home_xg} + {away_name} {away_xg}) respalda la línea de 2+ goles."
                 },
                 {
                     "market": "Más de 2.5 Goles Totales",
-                    "odds": round(odds_data.get("corners_odds", 1.80) * 1.02, 2),
+                    "odds": over25_odds,
                     "prob": over25_prob,
                     "badge": "⚖️ Perfil Medio",
-                    "reason": f"Volumen ofensivo de {home_name} ({home_xg} xG) más desmarque en contraataque."
+                    "reason": f"Volumen ofensivo de {home_name} ({home_xg} xG) más transiciones de {away_name} ({away_xg} xG)."
                 },
                 {
                     "market": "Ambos Equipos Anotan: SÍ",
-                    "odds": 1.78,
+                    "odds": btts_yes_odds,
                     "prob": btts_prob,
                     "badge": "🔥 Especial Betano",
-                    "reason": f"Eficacia de contraataque de {away_name} aprovecha espacios en transición."
+                    "reason": f"Proyección Poisson ({home_xg} vs {away_xg} xG) otorga valor en Ambos Anotan."
                 }
             ]
         }
@@ -460,8 +465,8 @@ class DeepStatsEngine:
             "id": f"{fixture_id}_bb_c1",
             "category": "🚩 CÓRNERS LOCAL",
             "market": f"{home_name}: Más de {int(home_corners - 1)}.5 Córners",
-            "odds": 1.45,
-            "prob": 88,
+            "odds": float(unified.get("corners_odds") or odds_data.get("corners_odds") or 1.45),
+            "prob": int(unified.get("corners_prob") or odds_data.get("corners_prob") or 88),
             "reason": f"Asedio del local en casa: proyecta {home_corners} tiros de esquina a favor."
         }
         comb1_pick2 = {
@@ -501,7 +506,7 @@ class DeepStatsEngine:
             "id": f"{fixture_id}_bb_g1",
             "category": "⚽ GOLES TOTALES",
             "market": "Total del Partido: Más de 1.5 Goles",
-            "odds": 1.25,
+            "odds": over15_odds,
             "prob": over15_prob,
             "reason": f"xG conjunto proyectado de {total_xg} garantiza alta probabilidad de goles."
         }
@@ -509,8 +514,8 @@ class DeepStatsEngine:
             "id": f"{fixture_id}_bb_c2",
             "category": "🚩 CÓRNERS TOTALES",
             "market": f"Total: Más de {int(total_corners - 1)}.5 Córners",
-            "odds": 1.48,
-            "prob": 84,
+            "odds": float(unified.get("over_85_corners_odds") or odds_data.get("over_85_corners_odds") or 1.48),
+            "prob": int(unified.get("over_85_corners_prob") or odds_data.get("over_85_corners_prob") or 84),
             "reason": f"Juego vertical y centros cruzados suman {total_corners} córners esperados."
         }
         comb2_pick3 = {

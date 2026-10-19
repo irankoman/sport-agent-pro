@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=weekly_calendar_v11')
+        navigator.serviceWorker.register('/sw.js?v=betano_engine_v12')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=weekly_calendar_v11')
+            navigator.serviceWorker.register('/service-worker.js?v=betano_engine_v12')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -259,46 +259,132 @@
       { id: 'sco', label: 'Scottish', flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿' }
     ];
 
-    // Motor defensivo de resolución y recálculo de cuotas En Vivo (In-Play Live Odds)
+    // Motor defensivo de resolución de cuotas Unificadas (Betano Consensus Engine + In-Play Live Odds)
     const resolveMatchLiveOdds = (m) => {
       try {
-        const od = (m && m.oddsDetails) ? m.oddsDetails : {};
-        const baseHome = Number(od.preHomeWin || od.homeWin || 1.85);
-        const baseDraw = Number(od.preDraw || od.draw || 3.50);
-        const baseAway = Number(od.preAwayWin || od.awayWin || 4.00);
-        const baseOver = Number(od.preOverGoals || od.overGoals || 1.82);
-        const baseLine = Number(od.preGoalsLine || od.goalsLine || 2.5);
+        const uo = (m && m.unifiedOdds && typeof m.unifiedOdds === 'object') ? m.unifiedOdds : {};
+        const od = (m && m.oddsDetails && typeof m.oddsDetails === 'object') ? m.oddsDetails : {};
+
+        const baseHome = Number(uo.pre_home || od.preHomeWin || uo.home || od.homeWin || 1.85);
+        const baseDraw = Number(uo.pre_draw || od.preDraw || uo.draw || od.draw || 3.50);
+        const baseAway = Number(uo.pre_away || od.preAwayWin || uo.away || od.awayWin || 4.00);
+        const baseOver = Number(uo.pre_over_25 || od.preOverGoals || uo.over_25 || od.overGoals || 1.82);
+        const baseUnder = Number(uo.pre_under_25 || od.preUnderGoals || uo.under_25 || od.underGoals || 1.95);
+        const baseLine = Number(uo.pre_goals_line || od.preGoalsLine || uo.goals_line || od.goalsLine || 2.5);
+
+        const providersCount = Number(uo.providersCount || od.providersCount || 3);
+        const providersBadge = String(uo.providersBadge || od.providersBadge || `✓ ${providersCount} Prov.`);
+        const providersList = Array.isArray(uo.providersList) ? uo.providersList : (Array.isArray(od.providersList) ? od.providersList : ['ESPN Bookies', 'Betano EU Sharp', 'Trader PPG/Tier']);
+
+        // Derivar probabilidades base limpias para coherencia matemática en mercados secundarios si faltan
+        const p1Raw = 1.0 / Math.max(1.05, baseHome);
+        const pxRaw = 1.0 / Math.max(1.10, baseDraw);
+        const p2Raw = 1.0 / Math.max(1.05, baseAway);
+        const sumRaw = p1Raw + pxRaw + p2Raw;
+        const p1 = p1Raw / sumRaw;
+        const px = pxRaw / sumRaw;
+        const p2 = p2Raw / sumRaw;
+        const marginSec = 1.06;
+
+        const calcDc1X = Math.min(Number((baseHome * 0.75).toFixed(2)), Math.max(1.05, Number((1.0 / ((p1 + px) * marginSec)).toFixed(2))));
+        const calcDcX2 = Math.min(Number((baseAway * 0.75).toFixed(2)), Math.max(1.05, Number((1.0 / ((px + p2) * marginSec)).toFixed(2))));
+        const calcDc12 = Math.max(1.10, Number((1.0 / ((p1 + p2) * marginSec)).toFixed(2)));
+        const calcDnbH = Math.min(Number((baseHome * 0.82).toFixed(2)), Math.max(1.06, Number((1.0 / ((p1 / Math.max(0.05, p1 + p2)) * marginSec)).toFixed(2))));
+        const calcDnbA = Math.min(Number((baseAway * 0.82).toFixed(2)), Math.max(1.06, Number((1.0 / ((p2 / Math.max(0.05, p1 + p2)) * marginSec)).toFixed(2))));
+
+        const dc1X = Number(uo.dc_1x || od.dc1X || calcDc1X);
+        const dcX2 = Number(uo.dc_x2 || od.dcX2 || calcDcX2);
+        const dc12 = Number(uo.dc_12 || od.dc12 || calcDc12);
+        const dnbHome = Number(uo.dnb_home || od.dnbHome || calcDnbH);
+        const dnbAway = Number(uo.dnb_away || od.dnbAway || calcDnbA);
+        const combo1XOver15 = Number(uo.combo_1x_over15 || od.combo1XOver15 || Math.max(1.25, Number((dc1X * 1.24).toFixed(2))));
+        const comboX2Over15 = Number(uo.combo_x2_over15 || od.comboX2Over15 || Math.max(1.28, Number((dcX2 * 1.24).toFixed(2))));
+        const ahHomePlus15 = Number(uo.ah_home_plus15 || od.ahHomePlus15 || Math.max(1.04, Number((dc1X * 0.86).toFixed(2))));
+        const ahAwayPlus15 = Number(uo.ah_away_plus15 || od.ahAwayPlus15 || Math.max(1.04, Number((dcX2 * 0.86).toFixed(2))));
+        const ahHomeMinus15 = Number(uo.ah_home_minus15 || od.ahHomeMinus15 || Math.max(1.70, Number((baseHome * 1.55).toFixed(2))));
+        const over15 = Number(uo.over_15 || od.over15 || Math.max(1.16, Number((baseOver * 0.72).toFixed(2))));
+        const under15 = Number(uo.under_15 || od.under15 || 3.40);
+        const over25 = Number(uo.over_25 || od.overGoals || baseOver);
+        const under25 = Number(uo.under_25 || od.underGoals || baseUnder);
+        const over35 = Number(uo.over_35 || od.over35 || Math.min(4.50, Number((over25 * 1.58).toFixed(2))));
+        const under35 = Number(uo.under_35 || od.under35 || 1.36);
+        const bttsYes = Number(uo.btts_yes || od.bttsYes || 1.78);
+        const bttsNo = Number(uo.btts_no || od.bttsNo || 1.95);
 
         if (!m || !m.isLive) {
           return {
-            homeWin: Number(od.homeWin || baseHome),
-            draw: Number(od.draw || baseDraw),
-            awayWin: Number(od.awayWin || baseAway),
-            overGoals: Number(od.overGoals || baseOver),
-            goalsLine: Number(od.goalsLine || baseLine),
+            homeWin: Number(uo.home || od.homeWin || baseHome),
+            draw: Number(uo.draw || od.draw || baseDraw),
+            awayWin: Number(uo.away || od.awayWin || baseAway),
+            dc1X,
+            dcX2,
+            dc12,
+            dnbHome,
+            dnbAway,
+            combo1XOver15,
+            comboX2Over15,
+            ahHomePlus15,
+            ahAwayPlus15,
+            ahHomeMinus15,
+            over15,
+            under15,
+            overGoals: over25,
+            underGoals: under25,
+            over25,
+            under25,
+            over35,
+            under35,
+            bttsYes,
+            bttsNo,
+            goalsLine: Number(uo.goals_line || od.goalsLine || baseLine),
             preHomeWin: baseHome,
             preDraw: baseDraw,
             preAwayWin: baseAway,
+            providersCount,
+            providersBadge,
+            providersList,
             isLiveOdds: false,
             liveMinute: 0,
             isMarketSuspended: false
           };
         }
 
-        // Si el backend ya calculó isLiveOdds, usar esos valores validados con fallback seguro
-        if (od.isLiveOdds) {
+        // Si el backend ya calculó isLiveOdds en unifiedOdds o oddsDetails, usar esos valores validados
+        if (uo.isLiveOdds || od.isLiveOdds) {
           return {
-            homeWin: Number(od.homeWin || baseHome),
-            draw: Number(od.draw || baseDraw),
-            awayWin: Number(od.awayWin || baseAway),
-            overGoals: Number(od.overGoals || baseOver),
-            goalsLine: Number(od.goalsLine || baseLine),
+            homeWin: Number(uo.home || od.homeWin || baseHome),
+            draw: Number(uo.draw || od.draw || baseDraw),
+            awayWin: Number(uo.away || od.awayWin || baseAway),
+            dc1X: Number(uo.dc_1x || od.dc1X || dc1X),
+            dcX2: Number(uo.dc_x2 || od.dcX2 || dcX2),
+            dc12: Number(uo.dc_12 || od.dc12 || dc12),
+            dnbHome: Number(uo.dnb_home || od.dnbHome || dnbHome),
+            dnbAway: Number(uo.dnb_away || od.dnbAway || dnbAway),
+            combo1XOver15,
+            comboX2Over15,
+            ahHomePlus15,
+            ahAwayPlus15,
+            ahHomeMinus15,
+            over15,
+            under15,
+            overGoals: Number(uo.over_25 || od.overGoals || baseOver),
+            underGoals: Number(uo.under_25 || od.underGoals || baseUnder),
+            over25: Number(uo.over_25 || od.overGoals || baseOver),
+            under25: Number(uo.under_25 || od.underGoals || baseUnder),
+            over35,
+            under35,
+            bttsYes,
+            bttsNo,
+            goalsLine: Number(uo.goals_line || od.goalsLine || baseLine),
             preHomeWin: baseHome,
             preDraw: baseDraw,
             preAwayWin: baseAway,
+            providersCount,
+            providersBadge,
+            providersList,
             isLiveOdds: true,
-            liveMinute: Number(od.liveMinute || 45),
-            isMarketSuspended: Boolean(od.isMarketSuspended)
+            liveMinute: Number(uo.liveMinute || od.liveMinute || 45),
+            isMarketSuspended: Boolean(uo.isMarketSuspended || od.isMarketSuspended)
           };
         }
 
@@ -329,15 +415,9 @@
 
         const remMins = Math.max(1.5, 90.0 - curMin + 2.5);
         const remRatio = Math.max(0.02, Math.min(1.0, remMins / 92.5));
-        const pH0 = 1.0 / baseHome;
-        const pD0 = 1.0 / baseDraw;
-        const pA0 = 1.0 / baseAway;
-        const sumP0 = pH0 + pD0 + pA0;
-        const normH = pH0 / sumP0;
-        const normA = pA0 / sumP0;
-        const totLam = 2.65;
-        const lamHRem = Math.max(0.03, totLam * (normH / (normH + normA)) * remRatio);
-        const lamARem = Math.max(0.03, totLam * (normA / (normH + normA)) * remRatio);
+        const totLam = Number(uo.total_lambda || 2.65);
+        const lamHRem = Math.max(0.03, totLam * (p1 / (p1 + p2)) * remRatio);
+        const lamARem = Math.max(0.03, totLam * (p2 / (p1 + p2)) * remRatio);
 
         const fact = (n) => (n <= 1 ? 1 : n * fact(n - 1));
         const maxG = 7;
@@ -359,9 +439,9 @@
         }
 
         const unc = 0.035 + 0.045 * remRatio;
-        pHome = pHome * (1 - unc) + pH0 * (unc * 0.45);
-        pDraw = pDraw * (1 - unc) + pD0 * (unc * 0.35);
-        pAway = pAway * (1 - unc) + pA0 * (unc * 0.45);
+        pHome = pHome * (1 - unc) + p1 * (unc * 0.45);
+        pDraw = pDraw * (1 - unc) + px * (unc * 0.35);
+        pAway = pAway * (1 - unc) + p2 * (unc * 0.45);
         const totP = Math.max(0.001, pHome + pDraw + pAway);
         pHome /= totP; pDraw /= totP; pAway /= totP;
 
@@ -389,16 +469,40 @@
           liveA = Math.max(1.15, Math.min(35.0, Number((1.0 / Math.max(0.028, pAway * margin)).toFixed(2))));
         }
 
+        const liveDc1X = Math.max(1.02, Math.min(Number((liveH * 0.78).toFixed(2)), Number((1.0 / Math.min(0.97, (pHome + pDraw) * margin)).toFixed(2))));
+        const liveDcX2 = Math.max(1.02, Math.min(Number((liveA * 0.78).toFixed(2)), Number((1.0 / Math.min(0.97, (pDraw + pAway) * margin)).toFixed(2))));
         const liveLine = Math.max(baseLine, hGoals + aGoals + 0.5);
         return {
           homeWin: liveH,
           draw: liveD,
           awayWin: liveA,
+          dc1X: liveDc1X,
+          dcX2: liveDcX2,
+          dc12,
+          dnbHome,
+          dnbAway,
+          combo1XOver15,
+          comboX2Over15,
+          ahHomePlus15,
+          ahAwayPlus15,
+          ahHomeMinus15,
+          over15,
+          under15,
           overGoals: baseOver,
+          underGoals: baseUnder,
+          over25: baseOver,
+          under25: baseUnder,
+          over35,
+          under35,
+          bttsYes,
+          bttsNo,
           goalsLine: liveLine,
           preHomeWin: baseHome,
           preDraw: baseDraw,
           preAwayWin: baseAway,
+          providersCount,
+          providersBadge,
+          providersList,
           isLiveOdds: true,
           liveMinute: curMin,
           isMarketSuspended: Boolean(curMin >= 89)
@@ -408,11 +512,33 @@
           homeWin: 1.85,
           draw: 3.50,
           awayWin: 4.00,
+          dc1X: 1.24,
+          dcX2: 1.82,
+          dc12: 1.28,
+          dnbHome: 1.38,
+          dnbAway: 2.75,
+          combo1XOver15: 1.52,
+          comboX2Over15: 2.25,
+          ahHomePlus15: 1.08,
+          ahAwayPlus15: 1.32,
+          ahHomeMinus15: 2.85,
+          over15: 1.28,
+          under15: 3.40,
           overGoals: 1.85,
+          underGoals: 1.95,
+          over25: 1.85,
+          under25: 1.95,
+          over35: 2.95,
+          under35: 1.38,
+          bttsYes: 1.78,
+          bttsNo: 1.95,
           goalsLine: 2.5,
           preHomeWin: 1.85,
           preDraw: 3.50,
           preAwayWin: 4.00,
+          providersCount: 3,
+          providersBadge: '✓ 3 Prov.',
+          providersList: ['ESPN Bookies', 'Betano EU Sharp', 'Trader PPG/Tier'],
           isLiveOdds: false,
           liveMinute: 0,
           isMarketSuspended: false
@@ -825,9 +951,10 @@
             const totalGoals = (Number.isFinite(homeScore) ? homeScore : 0) + (Number.isFinite(awayScore) ? awayScore : 0);
             const cleanScoreLabel = `${homeScore} - ${awayScore}`;
 
-            // Cuotas pre-partido seguras
-            const hOddsRaw = Number(m?.oddsDetails?.preHomeWin || m?.oddsDetails?.homeWin || 1.95);
-            const aOddsRaw = Number(m?.oddsDetails?.preAwayWin || m?.oddsDetails?.awayWin || 3.40);
+            // Cuotas pre-partido seguras desde unifiedOdds (Betano Consensus Engine)
+            const uo = resolveMatchLiveOdds(m);
+            const hOddsRaw = Number(uo.preHomeWin || m?.unifiedOdds?.pre_home || m?.oddsDetails?.preHomeWin || uo.homeWin || 1.95);
+            const aOddsRaw = Number(uo.preAwayWin || m?.unifiedOdds?.pre_away || m?.oddsDetails?.preAwayWin || uo.awayWin || 3.40);
             const hOdds = Number.isFinite(hOddsRaw) && hOddsRaw > 1.01 ? hOddsRaw : 1.95;
             const aOdds = Number.isFinite(aOddsRaw) && aOddsRaw > 1.01 ? aOddsRaw : 3.40;
             const favIsHome = hOdds <= aOdds;
@@ -863,11 +990,13 @@
             } else {
               const dcCode = favIsHome ? '1X' : 'X2';
               const p1Hit = favIsHome ? (homeScore >= awayScore) : (awayScore >= homeScore);
-              const dcOdds = Number(Math.max(1.25, Math.min(1.72, minOdds * 0.64)).toFixed(2));
+              const dcOdds = Number((favIsHome ? uo.dc1X : uo.dcX2).toFixed(2));
               const comboGoalsHit = totalGoals >= 2;
               const isCombo1X = minOdds <= 2.15;
               const finalP1Hit = isCombo1X ? (p1Hit && comboGoalsHit) : p1Hit;
-              const finalP1Odds = isCombo1X ? Number(Math.min(1.85, dcOdds * 1.18).toFixed(2)) : dcOdds;
+              const finalP1Odds = isCombo1X
+                ? Number((favIsHome ? uo.combo1XOver15 : uo.comboX2Over15).toFixed(2))
+                : dcOdds;
               const finalP1Label = isCombo1X
                 ? `🛡️ Sugerido: ${favTeam} ${dcCode} + Más de 1.5 Goles`
                 : `🛡️ Sugerido: Doble Oportunidad ${dcCode} (${favTeam} o Empate)`;
@@ -894,11 +1023,11 @@
             }
 
             // ===================================================================
-            // PICK 2: LÍNEA DE GOLES / BTTS
+            // PICK 2: LÍNEA DE GOLES / BTTS (DESDE UNIFIED ODDS)
             // ===================================================================
-            const rawGoalsLine = Number(m?.oddsDetails?.preGoalsLine || m?.oddsDetails?.goalsLine || 2.5);
+            const rawGoalsLine = Number(m?.unifiedOdds?.pre_goals_line || m?.oddsDetails?.preGoalsLine || uo.goalsLine || 2.5);
             const goalsLine = Number.isFinite(rawGoalsLine) && rawGoalsLine > 0 ? rawGoalsLine : 2.5;
-            const rawOverOdds = Number(m?.oddsDetails?.preOverGoals || m?.oddsDetails?.overGoals || 1.75);
+            const rawOverOdds = Number(m?.unifiedOdds?.pre_over_25 || m?.oddsDetails?.preOverGoals || uo.over25 || 1.75);
             const overOdds = Number.isFinite(rawOverOdds) && rawOverOdds > 1.01 ? Number(rawOverOdds.toFixed(2)) : 1.75;
             const p2Hit = totalGoals > goalsLine;
 
@@ -1891,22 +2020,29 @@
                                 <span>📍 {m.stadium}</span>
                                 {m.city && <span>• {m.city}</span>}
                                 {isFav && <span className="text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.2 rounded">⭐ Favorito</span>}
-                                {m.oddsDetails && (() => {
+                                {(m.unifiedOdds || m.oddsDetails) && (() => {
                                   const od = resolveMatchLiveOdds(m);
                                   if (m.isLive) {
                                     return (
-                                      <span className="text-[10px] font-mono bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded border border-amber-500/40 font-bold flex items-center gap-1.5 flex-wrap">
+                                      <span
+                                        className="text-[10px] font-mono bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded border border-amber-500/40 font-bold flex items-center gap-1.5 flex-wrap"
+                                        title={`Consenso Multi-Proveedor Betano: ${(od.providersList || []).join(' + ')}`}
+                                      >
                                         {od.isMarketSuspended && (
                                           <span className="text-rose-400 font-extrabold">🔒 Mercado Suspendido (&gt;88&apos;) ·</span>
                                         )}
-                                        <span>⚡ VIVO: 1: @{od.homeWin.toFixed(2)} · 2: @{od.awayWin.toFixed(2)}</span>
+                                        <span>⚡ VIVO: 1: @{od.homeWin.toFixed(2)} · X: @{od.draw.toFixed(2)} · 2: @{od.awayWin.toFixed(2)}</span>
+                                        <span className="text-[9px] text-emerald-300 bg-emerald-500/15 px-1 rounded border border-emerald-500/30">({od.providersBadge})</span>
                                         <span className="text-[9px] text-slate-400 font-normal">(Pre: @{od.preHomeWin.toFixed(2)} / @{od.preAwayWin.toFixed(2)})</span>
                                       </span>
                                     );
                                   }
                                   return (
-                                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold flex items-center gap-1">
-                                      <span>📊</span> 1: @{od.homeWin.toFixed(2)} · 2: @{od.awayWin.toFixed(2)}
+                                    <span
+                                      className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold flex items-center gap-1 flex-wrap"
+                                      title={`Consenso Multi-Proveedor Betano: ${(od.providersList || []).join(' + ')}`}
+                                    >
+                                      <span>📊</span> 1: @{od.homeWin.toFixed(2)} · X: @{od.draw.toFixed(2)} · 2: @{od.awayWin.toFixed(2)} <span className="text-sky-300 font-extrabold">({od.providersBadge})</span>
                                     </span>
                                   );
                                 })()}
@@ -2071,13 +2207,13 @@
                         <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">
                           📍 {selectedMatch.stadium} • {selectedMatch.city || 'Sede oficial'}
                         </p>
-                        {selectedMatch.oddsDetails && (() => {
+                        {(selectedMatch.unifiedOdds || selectedMatch.oddsDetails) && (() => {
                           const od = resolveMatchLiveOdds(selectedMatch);
                           if (selectedMatch.isLive) {
                             return (
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] font-mono">
                                 <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 shadow-sm">
-                                  <span>⚡</span> VIVO (In-Play Betano)
+                                  <span>⚡</span> VIVO (In-Play Betano · {od.providersBadge})
                                 </span>
                                 {od.isMarketSuspended && (
                                   <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-extrabold">
@@ -2085,25 +2221,29 @@
                                   </span>
                                 )}
                                 <span className="text-slate-200 font-bold">
-                                  1: <strong className="text-amber-300">@{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> · 2: <strong className="text-amber-300">@{od.awayWin.toFixed(2)}</strong>
+                                  📊 1: <strong className="text-amber-300">@{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> · 2: <strong className="text-amber-300">@{od.awayWin.toFixed(2)}</strong> <span className="text-emerald-400">({od.providersBadge})</span>
                                 </span>
                                 <span className="text-[10px] text-slate-400">
                                   (Pre: @{od.preHomeWin.toFixed(2)} / @{od.preDraw.toFixed(2)} / @{od.preAwayWin.toFixed(2)})
                                 </span>
                                 <span className="text-slate-500 hidden sm:inline">•</span>
                                 <span className="text-slate-300 hidden sm:inline">
-                                  O/U {od.goalsLine}: <strong className="text-emerald-400">@{od.overGoals.toFixed(2)}</strong>
+                                  1X: <strong className="text-sky-300">@{od.dc1X.toFixed(2)}</strong> · X2: <strong className="text-sky-300">@{od.dcX2.toFixed(2)}</strong> · O/U {od.goalsLine}: <strong className="text-emerald-400">@{od.overGoals.toFixed(2)}</strong>
                                 </span>
                               </div>
                             );
                           }
                           return (
                             <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] font-mono">
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
-                                <span>📊</span> Cuota Mercado (Ref. Betano/Live)
+                              <span
+                                className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm"
+                                title={`Fuentes: ${(od.providersList || []).join(' + ')}`}
+                              >
+                                <span>📊</span> 1: <strong className="text-orange-400">@{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> · 2: <strong className="text-orange-400">@{od.awayWin.toFixed(2)}</strong> <span className="text-sky-300 font-extrabold">({od.providersBadge})</span>
                               </span>
-                              <span className="text-slate-300">
-                                1X2: <strong className="text-orange-400">@{od.homeWin.toFixed(2)}</strong> / <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> / <strong className="text-orange-400">@{od.awayWin.toFixed(2)}</strong>
+                              <span className="text-slate-500 hidden sm:inline">•</span>
+                              <span className="text-slate-300 hidden sm:inline">
+                                🛡️ 1X: <strong className="text-sky-300">@{od.dc1X.toFixed(2)}</strong> · X2: <strong className="text-sky-300">@{od.dcX2.toFixed(2)}</strong> · DNB: <strong className="text-amber-300">@{od.dnbHome.toFixed(2)}/@{od.dnbAway.toFixed(2)}</strong>
                               </span>
                               <span className="text-slate-500 hidden sm:inline">•</span>
                               <span className="text-slate-300 hidden sm:inline">
@@ -4013,16 +4153,63 @@
                                 </div>
                               </div>
 
-                              {/* Nivel 1: Sumadores Seguros */}
-                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-                                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                              {/* Nivel 1: Sumadores Seguros + Mercados Oficiales Consenso Betano (unifiedOdds) */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3.5">
+                                <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
                                   <h4 className="text-xs font-black uppercase text-white flex items-center gap-2">
-                                    <span>🛡️</span> NIVEL 1: SUMADORES SEGUROS (PICKS INDIVIDUALES)
+                                    <span>🛡️</span> NIVEL 1: SUMADORES SEGUROS & MERCADOS UNIFICADOS BETANO
                                   </h4>
-                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm">
-                                    <span>📊</span> Cuota Mercado (Ref. Betano/Live)
-                                  </span>
+                                  {(() => {
+                                    const od = resolveMatchLiveOdds(selectedMatch);
+                                    return (
+                                      <span
+                                        className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm"
+                                        title={`Consenso Multi-Proveedor: ${(od.providersList || []).join(' + ')}`}
+                                      >
+                                        <span>📊</span> Consenso Betano ({od.providersBadge})
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
+
+                                {/* Panel rápido de Mercados de Bajo Riesgo, 1X2 y Goles desde unifiedOdds */}
+                                {(() => {
+                                  const od = resolveMatchLiveOdds(selectedMatch);
+                                  const quickUnifiedMarkets = [
+                                    { id: `${selectedMatch.id}_uo_1x`, category: '🛡️ DOBLE OPORTUNIDAD', market: `1X (${selectedMatch.homeTeam} o Empate)`, odds: od.dc1X, prob: selectedMatch?.unifiedOdds?.prob_dc_1x || 78, reason: `Doble Oportunidad 1X calibrada por consenso (${od.providersBadge}).` },
+                                    { id: `${selectedMatch.id}_uo_x2`, category: '🛡️ DOBLE OPORTUNIDAD', market: `X2 (Empate o ${selectedMatch.awayTeam})`, odds: od.dcX2, prob: selectedMatch?.unifiedOdds?.prob_dc_x2 || 68, reason: `Doble Oportunidad X2 calibrada por consenso (${od.providersBadge}).` },
+                                    { id: `${selectedMatch.id}_uo_dnb1`, category: '🛡️ SIN EMPATE (DNB)', market: `${selectedMatch.homeTeam}: Empate No Válido`, odds: od.dnbHome, prob: selectedMatch?.unifiedOdds?.prob_dnb_home || 72, reason: `Reembolso en caso de empate (${od.providersBadge}).` },
+                                    { id: `${selectedMatch.id}_uo_dnb2`, category: '🛡️ SIN EMPATE (DNB)', market: `${selectedMatch.awayTeam}: Empate No Válido`, odds: od.dnbAway, prob: selectedMatch?.unifiedOdds?.prob_dnb_away || 54, reason: `Reembolso en caso de empate (${od.providersBadge}).` },
+                                    { id: `${selectedMatch.id}_uo_c1x_o15`, category: '🔒 COMBO SEGURO BETANO', market: `1X + Más de 1.5 Goles`, odds: od.combo1XOver15, prob: selectedMatch?.unifiedOdds?.prob_combo_1x_over15 || 66, reason: `Combo seguro Betano derivado de Poisson Bivariado.` },
+                                    { id: `${selectedMatch.id}_uo_o15`, category: '⚽ GOLES TOTALES', market: `Más de 1.5 Goles`, odds: od.over15, prob: selectedMatch?.unifiedOdds?.prob_over_15 || 82, reason: `Línea base de goles (${od.providersBadge}).` },
+                                    { id: `${selectedMatch.id}_uo_o25`, category: '⚽ GOLES TOTALES', market: `Más de 2.5 Goles`, odds: od.over25, prob: selectedMatch?.unifiedOdds?.prob_over_25 || 62, reason: `Línea principal Over 2.5 Betano (${od.providersBadge}).` },
+                                    { id: `${selectedMatch.id}_uo_btts`, category: '⚽ AMBOS ANOTAN', market: `Ambos Equipos Anotan: SÍ`, odds: od.bttsYes, prob: selectedMatch?.unifiedOdds?.prob_btts_yes || 60, reason: `Proyección de gol en ambas áreas (${od.providersBadge}).` }
+                                  ];
+                                  return (
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/70 p-2.5 rounded-xl border border-slate-800">
+                                      {quickUnifiedMarkets.map((qm) => {
+                                        const isAdded = betSlip.some((p) => p.id === qm.id);
+                                        return (
+                                          <button
+                                            key={qm.id}
+                                            onClick={() => togglePickInSlip(qm)}
+                                            className={`p-2 rounded-lg border text-left transition flex flex-col justify-between ${
+                                              isAdded ? 'bg-orange-500/20 border-orange-500 text-white' : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
+                                            }`}
+                                          >
+                                            <span className="text-[9px] font-bold text-sky-400 uppercase truncate block">{qm.category}</span>
+                                            <span className="text-[11px] font-extrabold text-white truncate block mt-0.5" title={qm.market}>{qm.market}</span>
+                                            <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-slate-800/80 font-mono">
+                                              <span className="text-xs font-black text-orange-400">@{Number(qm.odds || 1.50).toFixed(2)}</span>
+                                              <span className="text-[9px] text-emerald-400 font-bold">{isAdded ? '✓ En Cupón' : `${qm.prob}% IA`}</span>
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                })()}
+
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
                                   {(selectedMatch.betanoLevel1 || []).map((pick) => {
                                     const isAdded = betSlip.some((p) => p.id === pick.id);

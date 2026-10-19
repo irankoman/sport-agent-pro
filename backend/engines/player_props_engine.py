@@ -34,8 +34,11 @@ class PlayerPropsEngine:
         odds_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         odds_data = odds_data or {}
-        home_win_odds = odds_data.get("pre_home_win_odds") or odds_data.get("home_win_odds", 1.85)
-        away_win_odds = odds_data.get("pre_away_win_odds") or odds_data.get("away_win_odds", 3.80)
+        unified = odds_data.get("unifiedOdds") or {}
+        home_win_odds = float(unified.get("pre_home") or odds_data.get("pre_home_win_odds") or odds_data.get("home_win_odds", 1.85))
+        away_win_odds = float(unified.get("pre_away") or odds_data.get("pre_away_win_odds") or odds_data.get("away_win_odds", 3.80))
+        lam_home = float(unified.get("lambda_home") or odds_data.get("lambda_home") or 1.45)
+        lam_away = float(unified.get("lambda_away") or odds_data.get("lambda_away") or 1.10)
 
         # Extracción 100% en vivo desde ESPN API: verificación estricta de starter: true en summary
         home_roster = MultiSourceRosterEngine.get_live_roster(home_name, league_code, home_team_id, event_id=fixture_id)
@@ -54,21 +57,21 @@ class PlayerPropsEngine:
         home_benched_notice = home_roster.get("benchedStarNotice")
 
         # ---------------------------------------------------------------------
-        # 1. ANOTADORES CALIBRADOS MATEMÁTICAMENTE (Poisson + Margen Betano 7.5%)
+        # 1. ANOTADORES CALIBRADOS MATEMÁTICAMENTE DESDE UNIFIED ODDS (Poisson + Margen Betano 7.5%)
         # ---------------------------------------------------------------------
         sc1_raw = home_avail_scorers[0] if home_avail_scorers else {"name": f"Delantero de {home_name}", "role": "Pateador N°1", "fit": 97}
         sc2_raw = home_avail_scorers[1] if len(home_avail_scorers) > 1 else (home_avail_scorers[0] if home_avail_scorers else {"name": f"Extremo de {home_name}", "role": "Segundo Atacante", "fit": 95})
         sc3_raw = away_avail_scorers[0] if away_avail_scorers else {"name": f"Atacante de {away_name}", "role": "Referente Visitante", "fit": 94}
 
-        # Calcular cuotas de goleadores en tiempo real
+        # Calcular cuotas de goleadores en tiempo real escaladas por lambda_home y lambda_away de unifiedOdds
         sc1_odds, sc1_prob, sc1_xg = BetanoOddsService.calculate_player_scorer_odds(
-            team_odds=home_win_odds, role_tier="striker_p1", is_home=True
+            team_odds=home_win_odds, role_tier="striker_p1", is_home=True, team_lambda=lam_home
         )
         sc2_odds, sc2_prob, sc2_xg = BetanoOddsService.calculate_player_scorer_odds(
-            team_odds=home_win_odds, role_tier="winger_p2", is_home=True
+            team_odds=home_win_odds, role_tier="winger_p2", is_home=True, team_lambda=lam_home
         )
         sc3_odds, sc3_prob, sc3_xg = BetanoOddsService.calculate_player_scorer_odds(
-            team_odds=away_win_odds, role_tier="striker_p1", is_home=False
+            team_odds=away_win_odds, role_tier="striker_p1", is_home=False, team_lambda=lam_away
         )
 
         # Ajuste dinámico por Vulnerabilidad Defensiva del Rival (Matchup)

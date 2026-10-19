@@ -149,6 +149,7 @@ def chat_with_agent(req: ChatRequest):
 from backend.services.real_sports_service import RealSportsService
 from backend.services.polling_engine import PollingEngine
 from backend.services.news_scraper import ContextNewsScraper
+from backend.services.odds_service import build_betano_consensus_odds, BetanoOddsService
 
 extract_goals_by_team = RealSportsService.extract_goals_by_team
 

@@ -749,7 +749,7 @@ class RealSportsService:
                 official_from_api=api_official
             )
 
-            # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL (Live Odds & Betano Calibration Engine)
+            # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL (Betano Consensus Engine Multi-Proveedor)
             odds_data = BetanoOddsService.extract_or_calculate_odds(
                 comp=comp,
                 home_name=home_name,
@@ -762,10 +762,43 @@ class RealSportsService:
                 away_score=away_score,
                 clock=clock if is_live else ""
             )
+            unified_odds = odds_data.get("unifiedOdds") or {}
 
             p1_id = f"{ev_id}_p1"
             p2_id = f"{ev_id}_p2"
             p3_id = f"{ev_id}_p3"
+            p4_id = f"{ev_id}_p4"
+            p5_id = f"{ev_id}_p5"
+
+            # Determinar favorito real para sugerencias 1X2 y Bajo Riesgo coherentes con unifiedOdds
+            h_odd = float(unified_odds.get("home") or odds_data["home_win_odds"])
+            d_odd = float(unified_odds.get("draw") or odds_data["draw_odds"])
+            a_odd = float(unified_odds.get("away") or odds_data["away_win_odds"])
+            fav_is_home = (h_odd <= a_odd)
+            fav_team = home_name if fav_is_home else away_name
+            fav_odd = h_odd if fav_is_home else a_odd
+            fav_prob = int(unified_odds.get("prob_home", odds_data["model_prob"])) if fav_is_home else int(unified_odds.get("prob_away", 45))
+            fav_dc_label = "1X" if fav_is_home else "X2"
+            fav_dc_odd = float(unified_odds.get("dc_1x" if fav_is_home else "dc_x2", 1.25))
+            fav_dc_prob = int(unified_odds.get("prob_dc_1x" if fav_is_home else "prob_dc_x2", 82))
+            fav_dnb_odd = float(unified_odds.get("dnb_home" if fav_is_home else "dnb_away", 1.38))
+            fav_dnb_prob = int(unified_odds.get("prob_dnb_home" if fav_is_home else "prob_dnb_away", 76))
+            over15_odd = float(unified_odds.get("over_15", 1.28))
+            over15_prob = int(unified_odds.get("prob_over_15", 82))
+            over25_odd = float(unified_odds.get("over_25", odds_data["over_goals_odds"]))
+            over25_prob = int(unified_odds.get("prob_over_25", 64))
+
+            # Si el partido es muy parejo (ambos > @2.15), recomendar Doble Oportunidad o Sin Empate (DNB) en Ganador/Bajo Riesgo
+            if fav_odd >= 2.15:
+                winner_market_str = f"Doble Oportunidad: {fav_team} o Empate ({fav_dc_label})"
+                winner_odd_val = fav_dc_odd
+                winner_prob_val = fav_dc_prob
+                winner_reason_str = f"Duelo parejo en consenso ({unified_odds.get('providersBadge', '✓ 3 Prov.')}). Respaldo seguro {fav_dc_label} en Betano."
+            else:
+                winner_market_str = f"{fav_team}: Ganador (1X2)"
+                winner_odd_val = fav_odd
+                winner_prob_val = fav_prob
+                winner_reason_str = f"Favorito validado por {unified_odds.get('providersBadge', '✓ 3 Prov.')} ({odds_data['source']}). Activa promo '2 Goles de Ventaja'."
 
             rec_corners = {
                 "id": p1_id,
@@ -786,16 +819,32 @@ class RealSportsService:
             rec_winner = {
                 "id": p3_id,
                 "category": "🏆 GANADOR",
-                "market": f"{home_name}: Ganador (1X2)",
-                "odds": odds_data["home_win_odds"],
-                "prob": odds_data["model_prob"],
-                "reason": f"Cuota dinámica Betano ({odds_data['source']}). Activa promo '2 Goles de Ventaja'."
+                "market": winner_market_str,
+                "odds": winner_odd_val,
+                "prob": winner_prob_val,
+                "reason": winner_reason_str
+            }
+            rec_low_risk = {
+                "id": p4_id,
+                "category": "🛡️ BAJO RIESGO",
+                "market": f"{fav_team}: Empate Apuesta No Válida (DNB)" if fav_odd < 2.15 else f"Más de 1.5 Goles Totales",
+                "odds": fav_dnb_odd if fav_odd < 2.15 else over15_odd,
+                "prob": fav_dnb_prob if fav_odd < 2.15 else over15_prob,
+                "reason": f"Cobertura matemática desde unifiedOdds ({unified_odds.get('providersBadge', '✓ 3 Prov.')})."
+            }
+            rec_goals = {
+                "id": p5_id,
+                "category": "⚽ LÍNEA DE GOLES",
+                "market": "Total de Goles: Más de 2.5 Goles" if over25_prob >= 56 else "Total de Goles: Más de 1.5 Goles",
+                "odds": over25_odd if over25_prob >= 56 else over15_odd,
+                "prob": over25_prob if over25_prob >= 56 else over15_prob,
+                "reason": f"Proyección Poisson ({unified_odds.get('lambda_home', 1.45)} + {unified_odds.get('lambda_away', 1.15)} xG esperados)."
             }
 
-            # Perfil conservador (cuota combinada ~1.65 - 1.80)
-            cons_odds = round(odds_data["corners_odds"] * 1.25, 2)
-            med_odds = round(odds_data["home_win_odds"] * 1.35, 2)
-            high_odds = round(odds_data["home_win_odds"] * odds_data["card_odds"] * 1.70, 2)
+            # Perfiles calibrados con unifiedOdds
+            cons_odds = round(fav_dc_odd * over15_odd, 2)
+            med_odds = round(winner_odd_val * odds_data["corners_odds"], 2)
+            high_odds = round(fav_odd * odds_data["card_odds"] * over25_odd * 0.85, 2)
 
             lookup_event_id = espn_event_id or ev_id
             home_avail_scorers = MultiSourceRosterEngine.get_available_scorers(home_name, lookup_event_id, league_code=espn_league_code, team_id=home_team_id)
@@ -836,26 +885,46 @@ class RealSportsService:
                 "stadium": venue_name,
                 "city": city,
                 "starred": False,
-                "oddsSource": odds_data.get("source", "📊 Cuota Mercado (Ref. Betano/Live)"),
-                "marketBadge": odds_data.get("market_badge", "📊 Cuota Mercado (Ref. Betano/Live)"),
+                "oddsSource": odds_data.get("source", "📊 Consenso Betano (✓ 3 Prov.)"),
+                "marketBadge": odds_data.get("market_badge", "📊 Consenso Betano (✓ 3 Prov.)"),
                 "syncTimestamp": odds_data.get("last_sync", "Reciente"),
+                "unifiedOdds": unified_odds,
                 "oddsDetails": {
-                    "homeWin": odds_data["home_win_odds"],
-                    "draw": odds_data["draw_odds"],
-                    "awayWin": odds_data["away_win_odds"],
-                    "overGoals": odds_data["over_goals_odds"],
-                    "underGoals": odds_data.get("under_goals_odds", 1.95),
+                    "homeWin": h_odd,
+                    "draw": d_odd,
+                    "awayWin": a_odd,
+                    "dc1X": unified_odds.get("dc_1x", 1.25),
+                    "dcX2": unified_odds.get("dc_x2", 1.65),
+                    "dc12": unified_odds.get("dc_12", 1.22),
+                    "dnbHome": unified_odds.get("dnb_home", 1.38),
+                    "dnbAway": unified_odds.get("dnb_away", 2.45),
+                    "combo1XOver15": unified_odds.get("combo_1x_over15", 1.55),
+                    "comboX2Over15": unified_odds.get("combo_x2_over15", 2.15),
+                    "ahHomePlus15": unified_odds.get("ah_home_plus15", 1.12),
+                    "ahAwayPlus15": unified_odds.get("ah_away_plus15", 1.30),
+                    "ahHomeMinus15": unified_odds.get("ah_home_minus15", 2.35),
+                    "over15": unified_odds.get("over_15", 1.28),
+                    "under15": unified_odds.get("under_15", 3.45),
+                    "overGoals": over25_odd,
+                    "underGoals": unified_odds.get("under_25", odds_data.get("under_goals_odds", 1.95)),
+                    "over35": unified_odds.get("over_35", 2.85),
+                    "under35": unified_odds.get("under_35", 1.40),
+                    "bttsYes": unified_odds.get("btts_yes", 1.78),
+                    "bttsNo": unified_odds.get("btts_no", 1.95),
                     "goalsLine": odds_data["goals_line"],
                     "isLiveOdds": odds_data.get("is_live_odds", False),
                     "liveMinute": odds_data.get("live_minute", 0),
                     "isMarketSuspended": odds_data.get("is_market_suspended", False),
-                    "preHomeWin": odds_data.get("pre_home_win_odds", odds_data["home_win_odds"]),
-                    "preDraw": odds_data.get("pre_draw_odds", odds_data["draw_odds"]),
-                    "preAwayWin": odds_data.get("pre_away_win_odds", odds_data["away_win_odds"]),
-                    "preOverGoals": odds_data.get("pre_over_goals_odds", odds_data["over_goals_odds"]),
+                    "preHomeWin": odds_data.get("pre_home_win_odds", h_odd),
+                    "preDraw": odds_data.get("pre_draw_odds", d_odd),
+                    "preAwayWin": odds_data.get("pre_away_win_odds", a_odd),
+                    "preOverGoals": odds_data.get("pre_over_goals_odds", over25_odd),
                     "preUnderGoals": odds_data.get("pre_under_goals_odds", odds_data.get("under_goals_odds", 1.95)),
                     "preGoalsLine": odds_data.get("pre_goals_line", odds_data["goals_line"]),
-                    "provider": odds_data.get("provider", "Betano / Mercado Real")
+                    "providersCount": unified_odds.get("providersCount", 3),
+                    "providersBadge": unified_odds.get("providersBadge", "✓ 3 Prov."),
+                    "providersList": unified_odds.get("providersList", []),
+                    "provider": odds_data.get("provider", "Betano Consensus Engine")
                 },
                 "lineupSummary": {
                   "homeType": "XI 100% TITULAR" if not home_bajas else f"XI CON {len(home_bajas)} BAJA(S)",
@@ -903,26 +972,26 @@ class RealSportsService:
                   "conservador": {
                     "title": "🛡️ Perfil Conservador",
                     "targetOdds": cons_odds,
-                    "prob": 89,
-                    "description": f"Córners {home_name} + Doble Oportunidad Betano.",
-                    "pickIds": [p1_id, p3_id]
+                    "prob": fav_dc_prob,
+                    "description": f"Doble Oportunidad {fav_dc_label} (@{fav_dc_odd:.2f}) + Más de 1.5 Goles (@{over15_odd:.2f}).",
+                    "pickIds": [p4_id, p5_id]
                   },
                   "medio": {
                     "title": "⚖️ Perfil Medio",
                     "targetOdds": med_odds,
                     "prob": 74,
-                    "description": f"Victoria de {home_name} + Tarjetas con {ref_stats.name}.",
-                    "pickIds": [p1_id, p2_id, p3_id]
+                    "description": f"{winner_market_str} + Córners {home_name}.",
+                    "pickIds": [p1_id, p3_id]
                   },
                   "altoRiesgo": {
                     "title": "🔥 Perfil Alto Riesgo",
                     "targetOdds": high_odds,
                     "prob": 44,
-                    "description": f"Hándicap {home_name} -1.5 + Más de 4.5 Tarjetas ({ref_stats.name}).",
-                    "pickIds": [p2_id, p3_id]
+                    "description": f"Victoria {fav_team} + Más de 2.5 Goles + Tarjetas ({ref_stats.name}).",
+                    "pickIds": [p2_id, p3_id, p5_id]
                   }
                 },
-                "betanoLevel1": [rec_corners, rec_cards, rec_winner],
+                "betanoLevel1": [rec_corners, rec_cards, rec_winner, rec_low_risk, rec_goals],
                 "betanoLevel2": []
             }
 

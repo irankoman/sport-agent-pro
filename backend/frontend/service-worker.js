@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-weekly_calendar_v11';
+const CACHE_NAME = 'sport-agent-v-betano_engine_v12';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=weekly_calendar_v11',
+  '/app.js?v=betano_engine_v12',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'
