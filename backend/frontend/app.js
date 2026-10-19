@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=team_goals_starters_v4')
+        navigator.serviceWorker.register('/sw.js?v=favs_sync_v8')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=team_goals_starters_v4')
+            navigator.serviceWorker.register('/service-worker.js?v=favs_sync_v8')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -300,21 +300,60 @@
     }
 
     const STORAGE_KEY_FAVORITES = 'sportagent_favorite_teams_v3';
+    const STORAGE_KEY_STARRED_MATCHES = 'sportagent_starred_matches_v3';
 
-    // Cargar selecciones manuales guardadas en localStorage (Sin equipos fijos por código)
+    // Normalizador de nombres de equipos para cruce exacto (ignora tildes, guiones, puntos y sufijos FC/CF)
+    const normTeamStr = (s) => {
+      try {
+        return String(s || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/\b(fc|cf|cd|ud|sc|ac|as|afc|fk|bk|if|sk)\b/g, '')
+          .replace(/[^a-z0-9]/g, '')
+          .trim();
+      } catch (e) {
+        return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      }
+    };
+
+    // Cargar selecciones manuales guardadas en localStorage (unificando todas las claves posibles)
     const loadSavedFavorites = () => {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY_FAVORITES);
-        if (saved !== null) {
-          return JSON.parse(saved);
+        const keys = [STORAGE_KEY_FAVORITES, 'sportagent_vip_teams_v10', 'sportagent_favorites', 'favoriteTeams'];
+        const merged = [];
+        const seen = new Set();
+        for (const k of keys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              for (const item of parsed) {
+                const name = typeof item === 'string' ? item.trim() : (item?.name || '').trim();
+                const nk = normTeamStr(name);
+                if (name && nk && !seen.has(nk)) {
+                  seen.add(nk);
+                  merged.push(name);
+                }
+              }
+            }
+          }
         }
-        const legacy = localStorage.getItem('sportagent_vip_teams_v10');
-        if (legacy !== null) {
-          return JSON.parse(legacy);
-        }
+        return merged;
       } catch (e) {
         console.error("Error leyendo favoritos de localStorage:", e);
       }
+      return [];
+    };
+
+    const loadSavedStarredMatches = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_STARRED_MATCHES);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) {}
       return [];
     };
 
@@ -345,6 +384,7 @@
 
       // Equipos Favoritos / VIP seleccionados manualmente por el usuario (Persistidos en localStorage)
       const [vipTeams, setVipTeams] = useState(loadSavedFavorites);
+      const [starredMatchIds, setStarredMatchIds] = useState(loadSavedStarredMatches);
 
       // 158 Equipos reales para selector VIP
       const [allTeamsData, setAllTeamsData] = useState({});
@@ -407,7 +447,7 @@
         bankrollProtected: true
       });
 
-      // Guardar inmediatamente en localStorage cada cambio de Favoritos/VIP por nombre de club
+      // Guardar inmediatamente en localStorage cada cambio de Favoritos/VIP por nombre de club o ID de partido
       useEffect(() => {
         try {
           localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(vipTeams));
@@ -417,50 +457,90 @@
         }
       }, [vipTeams]);
 
-      // Función de coincidencia con equipos Favoritos/VIP por nombre
+      useEffect(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY_STARRED_MATCHES, JSON.stringify(starredMatchIds));
+        } catch (e) {}
+      }, [starredMatchIds]);
+
+      // Función de coincidencia normalizada con equipos Favoritos/VIP por nombre
       const matchesVipTeam = (m, teamsList) => {
-        if (!m || !teamsList || teamsList.length === 0) return false;
-        const h = (m.homeTeam || '').toLowerCase().trim();
-        const a = (m.awayTeam || '').toLowerCase().trim();
+        if (!m || !Array.isArray(teamsList) || teamsList.length === 0) return false;
+        const hRaw = String(m.homeTeam?.name || m.homeTeam || m.home_name || '').toLowerCase().trim();
+        const aRaw = String(m.awayTeam?.name || m.awayTeam || m.away_name || '').toLowerCase().trim();
+        const hNorm = normTeamStr(hRaw);
+        const aNorm = normTeamStr(aRaw);
         return teamsList.some(vip => {
           if (!vip) return false;
-          const v = vip.toLowerCase().trim();
-          return h === v || a === v || h.includes(v) || v.includes(h) || a.includes(v) || v.includes(a);
+          const vRaw = String(vip).toLowerCase().trim();
+          const vNorm = normTeamStr(vRaw);
+          if (!vRaw) return false;
+          if (hRaw === vRaw || aRaw === vRaw) return true;
+          if (vNorm && (hNorm === vNorm || aNorm === vNorm)) return true;
+          if (vRaw.length >= 3 && (hRaw.includes(vRaw) || vRaw.includes(hRaw) || aRaw.includes(vRaw) || vRaw.includes(aRaw))) return true;
+          if (vNorm.length >= 3 && ((hNorm && (hNorm.includes(vNorm) || vNorm.includes(hNorm))) || (aNorm && (aNorm.includes(vNorm) || vNorm.includes(aNorm))))) return true;
+          return false;
         });
       };
 
-      // Determinar si un partido es Favorito / Importante bajo control manual del usuario
-      const isMatchFavorite = (m) => {
+      // Función auxiliar única: devuelve true si local o visita está en Mis Favoritos (localStorage) o el partido está marcado como favorito/importante
+      const isMatchFavoriteOrImportant = (m) => {
         if (!m) return false;
-        return matchesVipTeam(m, vipTeams);
+        const activeFavs = (Array.isArray(vipTeams) && vipTeams.length > 0) ? vipTeams : loadSavedFavorites();
+        if (matchesVipTeam(m, activeFavs)) return true;
+        if (m.id && Array.isArray(starredMatchIds) && starredMatchIds.includes(m.id)) return true;
+        if (Boolean(m.starred) || Boolean(m.is_favorite_involved)) return true;
+        return false;
       };
+      const isMatchFavorite = isMatchFavoriteOrImportant;
 
-      // Alternar estrella manual en cualquier partido: guarda por NOMBRE del equipo permanentemente en localStorage
+      // Alternar estrella manual en cualquier partido: sincroniza en tiempo real con Mis Favoritos y con Importantes/Favoritos
       const toggleStar = (id, e) => {
         if (e) e.stopPropagation();
         const match = matches.find(m => m.id === id);
         if (!match) return;
 
-        const h = (match.homeTeam || '').trim();
-        const a = (match.awayTeam || '').trim();
-        const currentlyFav = isMatchFavorite(match);
+        const h = String(match.homeTeam?.name || match.homeTeam || '').trim();
+        const a = String(match.awayTeam?.name || match.awayTeam || '').trim();
+        const hLow = h.toLowerCase();
+        const aLow = a.toLowerCase();
+        const hNorm = normTeamStr(h);
+        const aNorm = normTeamStr(a);
+        const currentlyFav = isMatchFavoriteOrImportant(match);
+
+        if (currentlyFav) {
+          setStarredMatchIds(prev => {
+            const nextIds = (Array.isArray(prev) ? prev : []).filter(mid => mid !== id);
+            try { localStorage.setItem(STORAGE_KEY_STARRED_MATCHES, JSON.stringify(nextIds)); } catch(err) {}
+            return nextIds;
+          });
+        } else {
+          setStarredMatchIds(prev => {
+            const base = Array.isArray(prev) ? prev : [];
+            const nextIds = base.includes(id) ? base : [...base, id];
+            try { localStorage.setItem(STORAGE_KEY_STARRED_MATCHES, JSON.stringify(nextIds)); } catch(err) {}
+            return nextIds;
+          });
+        }
 
         setVipTeams(prev => {
+          const baseList = Array.isArray(prev) ? prev : [];
           let next;
           if (currentlyFav) {
-            // Desmarcar: remover los nombres de equipos que coincidan
-            next = prev.filter(t => {
-              const tn = t.toLowerCase().trim();
-              const matchesH = tn === h.toLowerCase() || h.toLowerCase().includes(tn) || tn.includes(h.toLowerCase());
-              const matchesA = tn === a.toLowerCase() || a.toLowerCase().includes(tn) || tn.includes(a.toLowerCase());
+            // Desmarcar: remover los nombres de equipos que coincidan (normalizados o exactos)
+            next = baseList.filter(t => {
+              const tn = String(t || '').toLowerCase().trim();
+              const tNorm = normTeamStr(tn);
+              const matchesH = tn === hLow || (tNorm && hNorm && (tNorm === hNorm || (tNorm.length >= 3 && (hNorm.includes(tNorm) || tNorm.includes(hNorm))))) || (tn.length >= 3 && (hLow.includes(tn) || tn.includes(hLow)));
+              const matchesA = tn === aLow || (tNorm && aNorm && (tNorm === aNorm || (tNorm.length >= 3 && (aNorm.includes(tNorm) || tNorm.includes(aNorm))))) || (tn.length >= 3 && (aLow.includes(tn) || tn.includes(aLow)));
               return !matchesH && !matchesA;
             });
           } else {
-            // Marcar: agregar los nombres de ambos equipos de forma permanente
+            // Marcar: agregar los nombres de ambos equipos a Mis Favoritos de forma permanente
             const toAdd = [];
-            if (h && !prev.some(t => t.toLowerCase().trim() === h.toLowerCase())) toAdd.push(h);
-            if (a && !prev.some(t => t.toLowerCase().trim() === a.toLowerCase())) toAdd.push(a);
-            next = [...prev, ...toAdd];
+            if (h && !baseList.some(t => String(t || '').toLowerCase().trim() === hLow || (normTeamStr(t) && normTeamStr(t) === hNorm))) toAdd.push(h);
+            if (a && !baseList.some(t => String(t || '').toLowerCase().trim() === aLow || (normTeamStr(t) && normTeamStr(t) === aNorm))) toAdd.push(a);
+            next = [...baseList, ...toAdd];
           }
           try {
             localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
@@ -603,10 +683,15 @@
         return matches[0] || null;
       }, [matches, selectedMatchId]);
 
-      // Conteo de partidos favoritos activos
+      // Conteo de partidos favoritos activos en la jornada actual
       const favoriteMatchesCount = useMemo(() => {
-        return matches.filter(m => isMatchFavorite(m)).length;
-      }, [matches, vipTeams]);
+        const { startIso, endIso } = getActiveJornadaRange();
+        return matches.filter((m) => {
+          const mDate = m.matchDate || (m.rawDate ? m.rawDate.slice(0, 10) : '');
+          if (mDate && (mDate < startIso || mDate > endIso)) return false;
+          return isMatchFavoriteOrImportant(m);
+        }).length;
+      }, [matches, vipTeams, starredMatchIds]);
 
       // Filtrado reactivo de partidos con filtro estricto de semana/jornada en America/Santiago
       const filteredMatches = useMemo(() => {
@@ -619,17 +704,20 @@
             return false;
           }
 
+          if (onlyStarred) {
+            if (!isMatchFavoriteOrImportant(m)) return false;
+          }
+
           if (onlyLive && !m.isLive) return false;
           if (selectedDay === 'live' && !m.isLive) return false;
           
-          // 2. Filtro por día: verificar coincidencia exacta por dayId Y por fecha de la jornada
+          // 2. Filtro por día: verificar coincidencia exacta por dayId Y por fecha de la jornada (si no está en toda la semana)
           if (selectedDay !== 'all_week' && selectedDay !== 'live') {
             const expectedDate = dayDateMap[selectedDay];
             if (expectedDate && mDate && mDate !== expectedDate) return false;
             if (m.dayId !== selectedDay) return false;
           }
           
-          if (onlyStarred && !isMatchFavorite(m)) return false;
           if (!onlyStarred && selectedLeague !== 'all' && m.leagueId !== selectedLeague) return false;
 
           if (searchQuery.trim()) {
@@ -641,7 +729,7 @@
           }
           return true;
         });
-      }, [matches, selectedDay, selectedLeague, onlyStarred, onlyLive, searchQuery, vipTeams]);
+      }, [matches, selectedDay, selectedLeague, onlyStarred, onlyLive, searchQuery, vipTeams, starredMatchIds]);
 
       const applyRiskProfile = (profileKey) => {
         if (!selectedMatch) return;
@@ -685,11 +773,22 @@
       const toggleVipTeam = (teamName) => {
         const cleanName = (teamName || '').trim();
         if (!cleanName) return;
+        const cleanLow = cleanName.toLowerCase();
+        const cleanNorm = normTeamStr(cleanName);
         setVipTeams((prev) => {
-          const exists = prev.some(t => t.toLowerCase().trim() === cleanName.toLowerCase());
+          const base = Array.isArray(prev) ? prev : [];
+          const exists = base.some(t => {
+            const tl = String(t || '').toLowerCase().trim();
+            const tn = normTeamStr(tl);
+            return tl === cleanLow || (tn && cleanNorm && tn === cleanNorm);
+          });
           const next = exists
-            ? prev.filter(t => t.toLowerCase().trim() !== cleanName.toLowerCase())
-            : [...prev, cleanName];
+            ? base.filter(t => {
+                const tl = String(t || '').toLowerCase().trim();
+                const tn = normTeamStr(tl);
+                return tl !== cleanLow && !(tn && cleanNorm && tn === cleanNorm);
+              })
+            : [...base, cleanName];
           try {
             localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
             localStorage.setItem('sportagent_vip_teams_v10', JSON.stringify(next));
@@ -914,7 +1013,13 @@
               {/* 2. ⭐ IMPORTANTES / MIS FAVORITOS (UBICADO ANTES DE CHILE) */}
               <button
                 onClick={() => {
-                  setOnlyStarred(!onlyStarred);
+                  const nextState = !onlyStarred;
+                  setOnlyStarred(nextState);
+                  if (nextState) {
+                    setSelectedLeague('all');
+                    setSelectedDay('all_week');
+                    setOnlyLive(false);
+                  }
                 }}
                 className={`px-3 py-1 rounded text-xs font-bold flex items-center gap-1.5 border shrink-0 transition shadow-sm ${
                   onlyStarred 
@@ -3480,7 +3585,13 @@
                 {/* Lista de equipos */}
                 <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[380px]">
                   {flatTeamsList.map((t, idx) => {
-                    const isVip = vipTeams.some(vt => vt.toLowerCase().trim() === t.name.toLowerCase().trim());
+                    const tLow = String(t.name || '').toLowerCase().trim();
+                    const tNorm = normTeamStr(tLow);
+                    const isVip = vipTeams.some(vt => {
+                      const vLow = String(vt || '').toLowerCase().trim();
+                      const vNorm = normTeamStr(vLow);
+                      return vLow === tLow || (vNorm && tNorm && vNorm === tNorm);
+                    });
                     return (
                       <div
                         key={idx}
@@ -3511,14 +3622,16 @@
                 <div className="pt-3 border-t border-slate-800 flex flex-wrap justify-between items-center gap-2 text-xs">
                   <div className="flex items-center gap-3">
                     <span className="text-slate-400">Total Favoritos: <strong className="text-amber-400">{vipTeams.length}</strong></span>
-                    {vipTeams.length > 0 && (
+                    {(vipTeams.length > 0 || starredMatchIds.length > 0) && (
                       <button
                         onClick={() => {
                           if (confirm("¿Deseas desmarcar todos los equipos favoritos?")) {
                             setVipTeams([]);
+                            setStarredMatchIds([]);
                             try {
                               localStorage.setItem(STORAGE_KEY_FAVORITES, '[]');
                               localStorage.setItem('sportagent_vip_teams_v10', '[]');
+                              localStorage.setItem(STORAGE_KEY_STARRED_MATCHES, '[]');
                             } catch(e) {}
                           }
                         }}

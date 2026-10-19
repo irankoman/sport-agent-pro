@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-team_goals_starters_v4';
+const CACHE_NAME = 'sport-agent-v-favs_sync_v8';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=team_goals_starters_v4',
+  '/app.js?v=favs_sync_v8',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'
