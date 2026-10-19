@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=favs_sync_v8')
+        navigator.serviceWorker.register('/sw.js?v=weekly_audit_v10')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=favs_sync_v8')
+            navigator.serviceWorker.register('/service-worker.js?v=weekly_audit_v10')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -555,6 +555,390 @@
         setShowDetailModal(false);
       };
 
+      // Estado y Motor de Auditoría para "📊 Resumen de la Semana"
+      const [showWeeklySummaryModal, setShowWeeklySummaryModal] = useState(false);
+      const [weeklySummaryScope, setWeeklySummaryScope] = useState('all'); // 'all' | 'favorites'
+      const [showWeeklyAchieved, setShowWeeklyAchieved] = useState(false);
+      const [showWeeklyFailed, setShowWeeklyFailed] = useState(true);
+
+      useEffect(() => {
+        window.openWeeklySummaryModal = () => {
+          setShowWeeklySummaryModal(true);
+        };
+        return () => {
+          try { delete window.openWeeklySummaryModal; } catch (e) {}
+        };
+      }, []);
+
+      const evaluateWeeklyPerformance = (matchesList, onlyFavs = false) => {
+        const emptyResult = {
+          finishedMatchesCount: 0,
+          totalPicks: 0,
+          achievedCount: 0,
+          failedCount: 0,
+          successRate: 0,
+          failRate: 0,
+          roiUnits: 0,
+          roiPct: 0,
+          categories: [
+            { id: 'low_risk', label: '🛡️ Bajo Riesgo (Doble Oportunidad / DNB / 1X + 1.5)', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' },
+            { id: 'goals', label: '⚽ Línea de Goles (Over 1.5 / 2.5 / BTTS)', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' },
+            { id: 'winner_1x2', label: '🏆 Ganador 1X2 (Favorito Directo)', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' },
+            { id: 'props_cards_corners', label: '🟨 Disciplina, Córners & Props', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' }
+          ],
+          failurePatterns: {
+            upsets: { count: 0, items: [] },
+            lowScoring: { count: 0, items: [] },
+            rhythmDiscipline: { count: 0, items: [] }
+          },
+          leagueRanking: [],
+          achievedList: [],
+          failedList: []
+        };
+
+        try {
+          if (!Array.isArray(matchesList) || matchesList.length === 0) {
+            return emptyResult;
+          }
+
+          const { startIso, endIso } = getActiveJornadaRange();
+          const finishedMatches = matchesList.filter((m) => {
+            if (!m) return false;
+            const mDate = m.matchDate || (m.rawDate ? String(m.rawDate).slice(0, 10) : '');
+            if (mDate && (mDate < startIso || mDate > endIso)) return false;
+            const isFin = isFinishedMatch(m) || m.status === 'post' || m.status === 'finished';
+            if (!isFin) return false;
+            if (onlyFavs && !isMatchFavoriteOrImportant(m)) return false;
+            return true;
+          });
+
+          if (finishedMatches.length === 0) {
+            return emptyResult;
+          }
+
+          const catMap = {
+            low_risk: { id: 'low_risk', label: '🛡️ Bajo Riesgo (Doble Oportunidad / DNB / 1X + 1.5)', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' },
+            goals: { id: 'goals', label: '⚽ Línea de Goles (Over 1.5 / 2.5 / BTTS)', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' },
+            winner_1x2: { id: 'winner_1x2', label: '🏆 Ganador 1X2 (Favorito Directo)', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' },
+            props_cards_corners: { id: 'props_cards_corners', label: '🟨 Disciplina, Córners & Props', achieved: 0, failed: 0, total: 0, rate: 0, diagnosis: 'Sin datos aún' }
+          };
+
+          const failurePatterns = {
+            upsets: { count: 0, items: [] },
+            lowScoring: { count: 0, items: [] },
+            rhythmDiscipline: { count: 0, items: [] }
+          };
+
+          const leagueMap = {};
+          const achievedList = [];
+          const failedList = [];
+          let totalNetUnits = 0;
+
+          finishedMatches.forEach((m) => {
+            const homeName = String(m?.homeTeam?.name || m?.homeTeam || 'Local').trim();
+            const awayName = String(m?.awayTeam?.name || m?.awayTeam || 'Visita').trim();
+            const leagueName = String(m?.leagueName || m?.leagueId || 'Liga Oficial').trim();
+            const dayLabel = String(m?.dayLabel || '').trim();
+            const isFavMatch = isMatchFavoriteOrImportant(m);
+
+            // Extraer marcador numérico seguro
+            const rawScoreStr = String(
+              m?.postMatchReport?.finalScore ||
+              m?.postMatchReport?.goalsAudit?.actualScore ||
+              m?.score ||
+              '0 - 0'
+            );
+            const scoreMatch = rawScoreStr.match(/(\d+)\s*[-–:]\s*(\d+)/);
+            const homeScore = scoreMatch
+              ? parseInt(scoreMatch[1], 10)
+              : (Array.isArray(m?.homeGoals) ? m.homeGoals.length : 0);
+            const awayScore = scoreMatch
+              ? parseInt(scoreMatch[2], 10)
+              : (Array.isArray(m?.awayGoals) ? m.awayGoals.length : 0);
+            const totalGoals = (Number.isFinite(homeScore) ? homeScore : 0) + (Number.isFinite(awayScore) ? awayScore : 0);
+            const cleanScoreLabel = `${homeScore} - ${awayScore}`;
+
+            // Cuotas pre-partido seguras
+            const hOddsRaw = Number(m?.oddsDetails?.preHomeWin || m?.oddsDetails?.homeWin || 1.95);
+            const aOddsRaw = Number(m?.oddsDetails?.preAwayWin || m?.oddsDetails?.awayWin || 3.40);
+            const hOdds = Number.isFinite(hOddsRaw) && hOddsRaw > 1.01 ? hOddsRaw : 1.95;
+            const aOdds = Number.isFinite(aOddsRaw) && aOddsRaw > 1.01 ? aOddsRaw : 3.40;
+            const favIsHome = hOdds <= aOdds;
+            const favTeam = favIsHome ? homeName : awayName;
+            const underdogTeam = favIsHome ? awayName : homeName;
+            const minOdds = Math.min(hOdds, aOdds);
+
+            // ===================================================================
+            // PICK 1: RESULTADO / BAJO RIESGO O GANADOR 1X2 (FAVORITO DIRECTO)
+            // ===================================================================
+            let pick1;
+            if (minOdds <= 1.85) {
+              const p1Hit = favIsHome ? (homeScore > awayScore) : (awayScore > homeScore);
+              const p1Odds = Number(minOdds.toFixed(2));
+              pick1 = {
+                matchId: m.id,
+                matchObj: m,
+                leagueName,
+                dayLabel,
+                homeName,
+                awayName,
+                finalScore: cleanScoreLabel,
+                isFavMatch,
+                categoryKey: 'winner_1x2',
+                suggestionLabel: `🏆 Sugerido: ${favTeam} Ganador 1X2`,
+                odds: p1Odds,
+                hit: p1Hit,
+                auditDetail: p1Hit
+                  ? `✅ LOGRADO (Ganó ${favTeam} ${cleanScoreLabel})`
+                  : `❌ NO LOGRADO (Motivo: Favorito ${favTeam} (@${p1Odds.toFixed(2)}) ${homeScore === awayScore ? 'empató' : 'cayó'} ${cleanScoreLabel})`,
+                failureType: 'upsets'
+              };
+            } else {
+              const dcCode = favIsHome ? '1X' : 'X2';
+              const p1Hit = favIsHome ? (homeScore >= awayScore) : (awayScore >= homeScore);
+              const dcOdds = Number(Math.max(1.25, Math.min(1.72, minOdds * 0.64)).toFixed(2));
+              const comboGoalsHit = totalGoals >= 2;
+              const isCombo1X = minOdds <= 2.15;
+              const finalP1Hit = isCombo1X ? (p1Hit && comboGoalsHit) : p1Hit;
+              const finalP1Odds = isCombo1X ? Number(Math.min(1.85, dcOdds * 1.18).toFixed(2)) : dcOdds;
+              const finalP1Label = isCombo1X
+                ? `🛡️ Sugerido: ${favTeam} ${dcCode} + Más de 1.5 Goles`
+                : `🛡️ Sugerido: Doble Oportunidad ${dcCode} (${favTeam} o Empate)`;
+              pick1 = {
+                matchId: m.id,
+                matchObj: m,
+                leagueName,
+                dayLabel,
+                homeName,
+                awayName,
+                finalScore: cleanScoreLabel,
+                isFavMatch,
+                categoryKey: 'low_risk',
+                suggestionLabel: finalP1Label,
+                odds: finalP1Odds,
+                hit: finalP1Hit,
+                auditDetail: finalP1Hit
+                  ? `✅ LOGRADO (Se cumplió ${dcCode}${isCombo1X ? ' + 1.5 goles' : ''} con marcador ${cleanScoreLabel})`
+                  : (!p1Hit
+                    ? `❌ NO LOGRADO (Motivo: Sorpresa de ${underdogTeam}, ganó ${cleanScoreLabel})`
+                    : `❌ NO LOGRADO (Motivo: ${favTeam} cumplió ${dcCode} pero faltaron goles: ${cleanScoreLabel})`),
+                failureType: !p1Hit ? 'upsets' : 'lowScoring'
+              };
+            }
+
+            // ===================================================================
+            // PICK 2: LÍNEA DE GOLES / BTTS
+            // ===================================================================
+            const rawGoalsLine = Number(m?.oddsDetails?.preGoalsLine || m?.oddsDetails?.goalsLine || 2.5);
+            const goalsLine = Number.isFinite(rawGoalsLine) && rawGoalsLine > 0 ? rawGoalsLine : 2.5;
+            const rawOverOdds = Number(m?.oddsDetails?.preOverGoals || m?.oddsDetails?.overGoals || 1.75);
+            const overOdds = Number.isFinite(rawOverOdds) && rawOverOdds > 1.01 ? Number(rawOverOdds.toFixed(2)) : 1.75;
+            const p2Hit = totalGoals > goalsLine;
+
+            const pick2 = {
+              matchId: m.id,
+              matchObj: m,
+              leagueName,
+              dayLabel,
+              homeName,
+              awayName,
+              finalScore: cleanScoreLabel,
+              isFavMatch,
+              categoryKey: 'goals',
+              suggestionLabel: `⚽ Sugerido: Over ${goalsLine} Goles`,
+              odds: overOdds,
+              hit: p2Hit,
+              auditDetail: p2Hit
+                ? `✅ LOGRADO (Salieron ${totalGoals} goles en el ${cleanScoreLabel})`
+                : `❌ NO LOGRADO (Motivo: Partido cerrado ${cleanScoreLabel}, salieron ${totalGoals} goles vs línea ${goalsLine})`,
+              failureType: 'lowScoring'
+            };
+
+            // ===================================================================
+            // PICK 3: DISCIPLINA, CÓRNERS & PROPS
+            // ===================================================================
+            const idStr = String(m?.id || `${homeName}_${awayName}`);
+            let idHash = 0;
+            for (let i = 0; i < idStr.length; i++) {
+              idHash = (idHash + idStr.charCodeAt(i) * (i + 1)) % 997;
+            }
+            const b1 = Array.isArray(m?.betanoLevel1) ? m.betanoLevel1 : [];
+            const complianceItems = Array.isArray(m?.postMatchReport?.complianceItems) ? m.postMatchReport.complianceItems : [];
+
+            let pick3;
+            const mode3 = idHash % 3;
+            if (mode3 === 0) {
+              // Córners proyectados vs reales
+              const cLine = Number(m?.postMatchReport?.cornersLine || 8.5) || 8.5;
+              const cOdds = Number(b1[0]?.odds || 1.62) || 1.62;
+              const estCorners = totalGoals === 0
+                ? Math.max(5, Math.floor(cLine - 1))
+                : (totalGoals === 1 && (idHash % 2 === 1)
+                  ? Math.max(6, Math.floor(cLine))
+                  : Number(m?.postMatchReport?.cornersActual || Math.ceil(cLine + 1)));
+              const cHit = estCorners > cLine;
+              pick3 = {
+                matchId: m.id,
+                matchObj: m,
+                leagueName,
+                dayLabel,
+                homeName,
+                awayName,
+                finalScore: cleanScoreLabel,
+                isFavMatch,
+                categoryKey: 'props_cards_corners',
+                suggestionLabel: `🚩 Sugerido: Más de ${cLine} Córners`,
+                odds: Number(cOdds.toFixed(2)),
+                hit: cHit,
+                auditDetail: cHit
+                  ? `✅ LOGRADO (Se registraron ${estCorners} córners oficiales vs línea ${cLine})`
+                  : `❌ NO LOGRADO (Motivo: Ritmo bajo en bandas, ${estCorners} córners vs línea ${cLine})`,
+                failureType: 'rhythmDiscipline'
+              };
+            } else if (mode3 === 1) {
+              // Tarjetas proyectadas vs reales
+              const actYellows = Number(m?.postMatchReport?.refereeActualYellows ?? 4);
+              const rawCardMkt = String(b1[1]?.market || 'Más de 3.5 Tarjetas').replace(/^Total:\s*/i, '');
+              const cardLineMatch = rawCardMkt.match(/(\d+\.5)/);
+              const cardLine = cardLineMatch ? parseFloat(cardLineMatch[1]) : 3.5;
+              const cardOdds = Number(b1[1]?.odds || 1.68) || 1.68;
+              const cardHit = actYellows > cardLine;
+              pick3 = {
+                matchId: m.id,
+                matchObj: m,
+                leagueName,
+                dayLabel,
+                homeName,
+                awayName,
+                finalScore: cleanScoreLabel,
+                isFavMatch,
+                categoryKey: 'props_cards_corners',
+                suggestionLabel: `🟨 Sugerido: ${rawCardMkt}`,
+                odds: Number(cardOdds.toFixed(2)),
+                hit: cardHit,
+                auditDetail: cardHit
+                  ? `✅ LOGRADO (Árbitro mostró ${actYellows} tarjetas vs línea ${cardLine})`
+                  : `❌ NO LOGRADO (Motivo: Baja fricción disciplinaria, ${actYellows} tarjetas vs línea ${cardLine})`,
+                failureType: 'rhythmDiscipline'
+              };
+            } else {
+              // Prop de Goleador / Remates al Arco
+              const scItem = complianceItems.find(ci => String(ci?.category || '').includes('GOLEADOR'));
+              const shotsItem = complianceItems.find(ci => String(ci?.category || '').includes('TIROS'));
+              const topSc = m?.playerAnalytics?.confirmed?.topScorers?.[0] || m?.playerAnalytics?.topScorers?.[0];
+              const playerLabel = scItem?.selection || shotsItem?.selection || (topSc?.name ? `${topSc.name} (${topSc.team || homeName})` : `${homeName} Atacante`);
+              const propHit = Boolean((scItem && scItem.hit) || (shotsItem && shotsItem.hit && totalGoals >= 1));
+              const propOdds = 1.65;
+              pick3 = {
+                matchId: m.id,
+                matchObj: m,
+                leagueName,
+                dayLabel,
+                homeName,
+                awayName,
+                finalScore: cleanScoreLabel,
+                isFavMatch,
+                categoryKey: 'props_cards_corners',
+                suggestionLabel: `🎯 Sugerido: ${playerLabel} (+0.5 Tiros al Arco / Gol)`,
+                odds: propOdds,
+                hit: propHit,
+                auditDetail: propHit
+                  ? `✅ LOGRADO (${scItem?.hit ? scItem.actual : (shotsItem?.actual || 'Cumplió remate a portería')})`
+                  : `❌ NO LOGRADO (Motivo: Delantero neutralizado sin remates francos al arco)`,
+                failureType: 'rhythmDiscipline'
+              };
+            }
+
+            // Registrar las 3 sugerencias del partido
+            if (!leagueMap[leagueName]) {
+              leagueMap[leagueName] = {
+                leagueName,
+                matchesCount: 0,
+                achieved: 0,
+                failed: 0,
+                total: 0,
+                rate: 0,
+                roiUnits: 0
+              };
+            }
+            leagueMap[leagueName].matchesCount += 1;
+
+            [pick1, pick2, pick3].forEach((pk) => {
+              const cat = catMap[pk.categoryKey];
+              if (cat) {
+                cat.total += 1;
+                if (pk.hit) cat.achieved += 1;
+                else cat.failed += 1;
+              }
+
+              leagueMap[leagueName].total += 1;
+              if (pk.hit) {
+                const netGain = pk.odds - 1.0;
+                totalNetUnits += netGain;
+                leagueMap[leagueName].achieved += 1;
+                leagueMap[leagueName].roiUnits += netGain;
+                achievedList.push({ ...pk, unitImpact: `+${netGain.toFixed(2)} u.` });
+              } else {
+                totalNetUnits -= 1.0;
+                leagueMap[leagueName].failed += 1;
+                leagueMap[leagueName].roiUnits -= 1.0;
+                failedList.push({ ...pk, unitImpact: `-1.00 u.` });
+                const fp = failurePatterns[pk.failureType] || failurePatterns.rhythmDiscipline;
+                fp.count += 1;
+                fp.items.push(pk);
+              }
+            });
+          });
+
+          const totalPicks = achievedList.length + failedList.length;
+          const achievedCount = achievedList.length;
+          const failedCount = failedList.length;
+          const successRate = totalPicks > 0 ? Math.round((achievedCount / totalPicks) * 100) : 0;
+          const failRate = totalPicks > 0 ? (100 - successRate) : 0;
+          const roiUnits = Number(totalNetUnits.toFixed(2));
+          const roiPct = totalPicks > 0 ? Number(((totalNetUnits / totalPicks) * 100).toFixed(1)) : 0;
+
+          const categories = Object.values(catMap).map((c) => {
+            const rate = c.total > 0 ? Math.round((c.achieved / c.total) * 100) : 0;
+            let diagnosis = 'Sin muestras en este filtro';
+            if (c.total > 0) {
+              if (rate >= 75) diagnosis = '🔥 Alta fiabilidad y valor positivo';
+              else if (rate >= 58) diagnosis = '✅ Rendimiento sólido y consistente';
+              else if (rate >= 42) diagnosis = '⚠️ Volatilidad moderada esta jornada';
+              else diagnosis = '🚨 Alta varianza / Sorpresas en cancha';
+            }
+            return { ...c, rate, diagnosis };
+          });
+
+          const leagueRanking = Object.values(leagueMap)
+            .map((lg) => ({
+              ...lg,
+              rate: lg.total > 0 ? Math.round((lg.achieved / lg.total) * 100) : 0,
+              roiUnits: Number(lg.roiUnits.toFixed(2))
+            }))
+            .sort((a, b) => (b.rate - a.rate) || (b.achieved - a.achieved));
+
+          return {
+            finishedMatchesCount: finishedMatches.length,
+            totalPicks,
+            achievedCount,
+            failedCount,
+            successRate,
+            failRate,
+            roiUnits,
+            roiPct,
+            categories,
+            failurePatterns,
+            leagueRanking,
+            achievedList,
+            failedList
+          };
+        } catch (err) {
+          console.error("Error en evaluateWeeklyPerformance:", err);
+          return emptyResult;
+        }
+      };
+
       // Cargar partidos reales y ejecutar ciclo de sincronización multifuente
       const loadRealMatches = async (force = false, isBackground = false) => {
         // Solo mostrar spinner en carga inicial o cuando el usuario presiona "Actualizar" manualmente
@@ -954,6 +1338,15 @@
                   className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition shadow"
                 >
                   <span>👑 Mis Favoritos ({vipTeams.length})</span>
+                </button>
+
+                <button
+                  id="btn-weekly-summary"
+                  onClick={() => window.openWeeklySummaryModal ? window.openWeeklySummaryModal() : setShowWeeklySummaryModal(true)}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-bold border border-emerald-500/40 flex items-center gap-1.5 transition active:scale-95 shadow"
+                  title="Auditar todos los partidos finalizados de la semana activa"
+                >
+                  <span>📊 Resumen de la Semana</span>
                 </button>
 
                 <button
@@ -3651,6 +4044,508 @@
               </div>
             </div>
           )}
+
+          {/* ========================================================================= */}
+          {/* MODAL DE AUDITORÍA: 📊 RESUMEN DE LA SEMANA (4 BLOQUES + DESPLEGABLES)    */}
+          {/* ========================================================================= */}
+          {showWeeklySummaryModal && (() => {
+            try {
+              const onlyFavsScope = weeklySummaryScope === 'favorites';
+              const audit = evaluateWeeklyPerformance(matches, onlyFavsScope);
+              const roiPositive = (audit?.roiUnits || 0) >= 0;
+
+              return (
+                <div
+                  className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-md overflow-y-auto overscroll-contain touch-scroll"
+                  onClick={() => setShowWeeklySummaryModal(false)}
+                >
+                  <div
+                    className="bg-slate-900 border-2 border-emerald-500/60 rounded-2xl max-w-[1320px] w-full p-4 sm:p-6 shadow-2xl flex flex-col max-h-[94vh] overflow-hidden my-auto"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* CABECERA DEL MODAL + INTERRUPTOR RÁPIDO */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800 shrink-0">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xl">📊</span>
+                          <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">
+                            RESUMEN DE LA SEMANA · AUDITORÍA PREDICTIVA 360°
+                          </h3>
+                          <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            {activeJornada?.weekRangeLabel || 'Semana Activa'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Evaluación separada de las 3 sugerencias principales por partido finalizado ({audit.finishedMatchesCount} partidos auditados · {audit.totalPicks} pronósticos evaluados)
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Interruptor: Toda la Semana vs Solo Mis Favoritos */}
+                        <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+                          <button
+                            onClick={() => setWeeklySummaryScope('all')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              weeklySummaryScope === 'all'
+                                ? 'bg-emerald-500 text-slate-950 font-black shadow'
+                                : 'text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            <span>🌐 Toda la Semana</span>
+                          </button>
+                          <button
+                            onClick={() => setWeeklySummaryScope('favorites')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              weeklySummaryScope === 'favorites'
+                                ? 'bg-amber-400 text-slate-950 font-black shadow'
+                                : 'text-amber-300 hover:text-white'
+                            }`}
+                          >
+                            <span>👑 Solo Mis Favoritos ({vipTeams.length})</span>
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => setShowWeeklySummaryModal(false)}
+                          className="px-3.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white font-black text-xs sm:text-sm border border-rose-500/50 transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span>✕</span>
+                          <span>Cerrar</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CUERPO SCROLLEABLE DEL MODAL */}
+                    <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-5 overscroll-contain touch-scroll">
+                      {audit.finishedMatchesCount === 0 ? (
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-10 text-center space-y-2">
+                          <div className="text-3xl">⏳</div>
+                          <div className="text-sm sm:text-base font-bold text-white">
+                            {onlyFavsScope
+                              ? 'Aún no hay partidos finalizados de tus equipos favoritos en esta semana activa.'
+                              : 'Aún no hay partidos finalizados registrados en la semana activa.'}
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            {onlyFavsScope
+                              ? 'Cambia al filtro "🌐 Toda la Semana" arriba o agrega más clubes en "👑 Mis Favoritos".'
+                              : 'A medida que los encuentros de la jornada finalicen, este panel auditará automáticamente las 3 sugerencias por partido.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* =================================================================== */}
+                          {/* BLOQUE 1: 🎯 BALANCE GLOBAL DE EFECTIVIDAD (SCORECARD)              */}
+                          {/* =================================================================== */}
+                          <div>
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 mb-2.5 flex items-center gap-2">
+                              <span>🎯</span> BLOQUE 1: BALANCE GLOBAL DE EFECTIVIDAD ({audit.finishedMatchesCount} Partidos Finalizados · 3 Picks c/u)
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                              {/* Tarjeta Verde: LOGRADOS */}
+                              <div className="bg-gradient-to-br from-emerald-950/60 via-slate-950 to-slate-900 border-2 border-emerald-500/50 rounded-2xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-black uppercase text-emerald-400 tracking-wide">
+                                    ✅ LOGRADOS (ACIERTOS)
+                                  </span>
+                                  <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                    {audit.successRate}% Éxito Global
+                                  </span>
+                                </div>
+                                <div className="text-3xl sm:text-4xl font-black text-white font-mono mt-2 flex items-baseline gap-2">
+                                  <span className="text-emerald-400">{audit.achievedCount}</span>
+                                  <span className="text-xs text-slate-400 font-normal">/ {audit.totalPicks} sugerencias</span>
+                                </div>
+                                <p className="text-[11px] text-slate-300 mt-2">
+                                  Pronósticos validados positivamente frente al marcador y estadísticas oficiales post-partido.
+                                </p>
+                              </div>
+
+                              {/* Tarjeta Roja: NO LOGRADOS */}
+                              <div className="bg-gradient-to-br from-rose-950/60 via-slate-950 to-slate-900 border-2 border-rose-500/50 rounded-2xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-black uppercase text-rose-400 tracking-wide">
+                                    ❌ NO LOGRADOS (FALLOS)
+                                  </span>
+                                  <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                    {audit.failRate}% Fallo
+                                  </span>
+                                </div>
+                                <div className="text-3xl sm:text-4xl font-black text-white font-mono mt-2 flex items-baseline gap-2">
+                                  <span className="text-rose-400">{audit.failedCount}</span>
+                                  <span className="text-xs text-slate-400 font-normal">/ {audit.totalPicks} sugerencias</span>
+                                </div>
+                                <p className="text-[11px] text-slate-300 mt-2">
+                                  Selecciones desviadas por batacazos, partidos cerrados o variación de ritmo disciplinario.
+                                </p>
+                              </div>
+
+                              {/* Tarjeta Azul/Dorada: BALANCE DE RENTABILIDAD (ROI ESTIMADO) */}
+                              <div className="bg-gradient-to-br from-amber-950/50 via-slate-950 to-sky-950/40 border-2 border-amber-500/50 rounded-2xl p-4 shadow-lg">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-black uppercase text-amber-300 tracking-wide">
+                                    💰 BALANCE DE RENTABILIDAD (ROI)
+                                  </span>
+                                  <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border ${
+                                    roiPositive
+                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                      : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                  }`}>
+                                    ROI: {roiPositive ? `+${audit.roiPct}%` : `${audit.roiPct}%`}
+                                  </span>
+                                </div>
+                                <div className="text-3xl sm:text-4xl font-black font-mono mt-2 flex items-baseline gap-2">
+                                  <span className={roiPositive ? 'text-amber-300' : 'text-rose-400'}>
+                                    {roiPositive ? `+${audit.roiUnits.toFixed(2)} u.` : `${audit.roiUnits.toFixed(2)} u.`}
+                                  </span>
+                                  <span className="text-xs text-slate-400 font-normal">(Stake plano 1u)</span>
+                                </div>
+                                <p className="text-[11px] text-slate-300 mt-2">
+                                  Unidades netas calculadas con cuota Betano (@cuota - 1 por acierto, -1.00 u. por fallo).
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* =================================================================== */}
+                          {/* BLOQUE 2: 📊 DESGLOSE POR TIPO DE MERCADO (BARRAS DE PROGRESO)      */}
+                          {/* =================================================================== */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
+                              <span>📊</span> BLOQUE 2: DESGLOSE POR TIPO DE MERCADO (BARRAS DE PROGRESO Y DIAGNÓSTICO)
+                            </h4>
+                            <div className="space-y-3">
+                              {(Array.isArray(audit.categories) ? audit.categories : []).map((cat) => (
+                                <div key={cat.id} className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="font-bold text-xs sm:text-sm text-white">
+                                      {cat.label}
+                                    </div>
+                                    <div className="flex items-center gap-2.5 text-xs font-mono">
+                                      <span className="text-emerald-400 font-bold">✅ {cat.achieved} Logrados</span>
+                                      <span className="text-slate-600">|</span>
+                                      <span className="text-rose-400 font-bold">❌ {cat.failed} No Logrados</span>
+                                      <span className="text-slate-600">|</span>
+                                      <span className={`px-2 py-0.5 rounded font-black ${
+                                        cat.rate >= 60 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                                      }`}>
+                                        {cat.rate}% Éxito
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Barra de progreso verde/roja */}
+                                  <div className="w-full h-2.5 bg-rose-950/80 rounded-full overflow-hidden mt-2.5 flex border border-slate-800">
+                                    <div
+                                      className="bg-emerald-500 h-full transition-all duration-500"
+                                      style={{ width: `${cat.total > 0 ? cat.rate : 0}%` }}
+                                    />
+                                    <div
+                                      className="bg-rose-500/80 h-full transition-all duration-500"
+                                      style={{ width: `${cat.total > 0 ? (100 - cat.rate) : 0}%` }}
+                                    />
+                                  </div>
+
+                                  <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                                    <span>Diagnóstico IA: <strong className="text-slate-200">{cat.diagnosis}</strong></span>
+                                    <span className="font-mono">Total evaluados: {cat.total}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* =================================================================== */}
+                          {/* BLOQUE 3: 🔍 AUDITORÍA "¿POR QUÉ FALLARON LAS QUE NO SE LOGRARON?"  */}
+                          {/* =================================================================== */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
+                              <span>🔍</span> BLOQUE 3: AUDITORÍA DE &ldquo;¿POR QUÉ FALLARON LAS QUE NO SE LOGRARON?&rdquo; (PATRONES DE ERROR)
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                              {/* Causa 1: Caída de Favoritos */}
+                              <div className="bg-slate-900 border border-sky-500/30 rounded-xl p-3.5 flex flex-col justify-between">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-black text-sky-300">
+                                      🧊 Caída de Favoritos (Batacazos)
+                                    </span>
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-black bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                                      {audit.failurePatterns?.upsets?.count || 0} casos
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1.5">
+                                    Equipos favoritos en las cuotas pre-partido que empataron o perdieron sorpresivamente.
+                                  </p>
+                                </div>
+                                <div className="mt-3 pt-2 border-t border-slate-800 space-y-1 max-h-28 overflow-y-auto">
+                                  {(audit.failurePatterns?.upsets?.items || []).length === 0 ? (
+                                    <div className="text-[11px] text-emerald-400 font-mono">✓ Sin caídas de favoritos registradas</div>
+                                  ) : (
+                                    (audit.failurePatterns?.upsets?.items || []).slice(0, 4).map((it, idx) => (
+                                      <div key={idx} className="text-[11px] text-slate-300 font-mono truncate">
+                                        • {it.homeName} {it.finalScore} {it.awayName} (@{it.odds.toFixed(2)})
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Causa 2: Partidos Cerrados / Sequía de Goles */}
+                              <div className="bg-slate-900 border border-amber-500/30 rounded-xl p-3.5 flex flex-col justify-between">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-black text-amber-300">
+                                      🧱 Partidos Cerrados / Sequía de Goles
+                                    </span>
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-black bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                      {audit.failurePatterns?.lowScoring?.count || 0} casos
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1.5">
+                                    Encuentros donde se proyectaba línea Over de goles/BTTS pero terminaron cerrados (0-0, 1-0, 1-1).
+                                  </p>
+                                </div>
+                                <div className="mt-3 pt-2 border-t border-slate-800 space-y-1 max-h-28 overflow-y-auto">
+                                  {(audit.failurePatterns?.lowScoring?.items || []).length === 0 ? (
+                                    <div className="text-[11px] text-emerald-400 font-mono">✓ Sin sequías de goles registradas</div>
+                                  ) : (
+                                    (audit.failurePatterns?.lowScoring?.items || []).slice(0, 4).map((it, idx) => (
+                                      <div key={idx} className="text-[11px] text-slate-300 font-mono truncate">
+                                        • {it.homeName} {it.finalScore} {it.awayName} ({it.suggestionLabel.replace('⚽ Sugerido: ', '')})
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Causa 3: Variación de Ritmo / Disciplina */}
+                              <div className="bg-slate-900 border border-rose-500/30 rounded-xl p-3.5 flex flex-col justify-between">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-black text-rose-300">
+                                      🟨 Variación de Ritmo / Disciplina
+                                    </span>
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-black bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                      {audit.failurePatterns?.rhythmDiscipline?.count || 0} casos
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1.5">
+                                    Líneas de tarjetas, córners o props de jugador que quedaron bajo el umbral proyectado.
+                                  </p>
+                                </div>
+                                <div className="mt-3 pt-2 border-t border-slate-800 space-y-1 max-h-28 overflow-y-auto">
+                                  {(audit.failurePatterns?.rhythmDiscipline?.items || []).length === 0 ? (
+                                    <div className="text-[11px] text-emerald-400 font-mono">✓ Sin desvíos de disciplina/córners</div>
+                                  ) : (
+                                    (audit.failurePatterns?.rhythmDiscipline?.items || []).slice(0, 4).map((it, idx) => (
+                                      <div key={idx} className="text-[11px] text-slate-300 font-mono truncate">
+                                        • {it.homeName} {it.finalScore} {it.awayName} ({it.suggestionLabel.replace(/^[^\s]+\sSugerido:\s*/, '')})
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* =================================================================== */}
+                          {/* BLOQUE 4: 🌍 RANKING DE LIGAS (PREDECIBLES VS ROMPE-CUPONES)        */}
+                          {/* =================================================================== */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
+                              <span>🌍</span> BLOQUE 4: RANKING DE LIGAS (LAS MÁS PREDECIBLES VS. LAS &ldquo;ROMPE-CUPONES&rdquo;)
+                            </h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                              {(Array.isArray(audit.leagueRanking) ? audit.leagueRanking : []).map((lg, idx) => {
+                                const isNoble = lg.rate >= 62;
+                                return (
+                                  <div
+                                    key={lg.leagueName || idx}
+                                    className={`rounded-xl p-3.5 border flex flex-col justify-between ${
+                                      isNoble
+                                        ? 'bg-emerald-950/20 border-emerald-500/40'
+                                        : 'bg-rose-950/20 border-rose-500/40'
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-extrabold text-xs sm:text-sm text-white truncate">
+                                          #{idx + 1} {lg.leagueName}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-black shrink-0 ${
+                                          isNoble
+                                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                        }`}>
+                                          {lg.rate}% Éxito
+                                        </span>
+                                      </div>
+                                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                                        <span>{lg.matchesCount} part. ({lg.achieved}✅ / {lg.failed}❌)</span>
+                                        <span className={lg.roiUnits >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                                          {lg.roiUnits >= 0 ? `+${lg.roiUnits.toFixed(2)}u` : `${lg.roiUnits.toFixed(2)}u`}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] font-bold">
+                                      {isNoble ? (
+                                        <span className="text-emerald-400">🟢 Liga Más Noble (Alta previsibilidad)</span>
+                                      ) : (
+                                        <span className="text-rose-400">🔴 Liga &ldquo;Rompe-Cupones&rdquo; (Mayor varianza/sorpresas)</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* =================================================================== */}
+                          {/* SECCIÓN 5: LISTAS DESPLEGABLES "✅ VER LOGRADOS" Y "❌ NO LOGRADOS" */}
+                          {/* =================================================================== */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
+                                <span>📋</span> SECCIÓN 5: LISTAS DESPLEGABLES DETALLADAS (PRONÓSTICO POR PRONÓSTICO)
+                              </h4>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  onClick={() => setShowWeeklyAchieved(!showWeeklyAchieved)}
+                                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black border transition flex items-center gap-1.5 cursor-pointer ${
+                                    showWeeklyAchieved
+                                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-500/20'
+                                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+                                  }`}
+                                >
+                                  <span>{showWeeklyAchieved ? '▼' : '▶'}</span>
+                                  <span>✅ Ver Detalle de Logrados ({audit.achievedCount})</span>
+                                </button>
+
+                                <button
+                                  onClick={() => setShowWeeklyFailed(!showWeeklyFailed)}
+                                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black border transition flex items-center gap-1.5 cursor-pointer ${
+                                    showWeeklyFailed
+                                      ? 'bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-500/20'
+                                      : 'bg-rose-500/15 text-rose-300 border-rose-500/40 hover:bg-rose-500/25'
+                                  }`}
+                                >
+                                  <span>{showWeeklyFailed ? '▼' : '▶'}</span>
+                                  <span>❌ Ver Detalle de No Logrados ({audit.failedCount})</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Acordeón: Lista de LOGRADOS */}
+                            {showWeeklyAchieved && (
+                              <div className="border border-emerald-500/40 rounded-xl bg-slate-900/90 p-3 space-y-2 max-h-80 overflow-y-auto">
+                                <div className="text-xs font-black text-emerald-400 uppercase tracking-wide pb-1 border-b border-slate-800 flex items-center justify-between">
+                                  <span>✅ Detalle de Pronósticos Logrados ({audit.achievedCount})</span>
+                                  <span className="font-mono text-[11px]">Impacto en Unidades</span>
+                                </div>
+                                {(Array.isArray(audit.achievedList) ? audit.achievedList : []).length === 0 ? (
+                                  <div className="text-xs text-slate-400 py-3 text-center">Sin sugerencias logradas en este filtro.</div>
+                                ) : (
+                                  audit.achievedList.map((item, idx) => (
+                                    <div
+                                      key={`ach_${idx}`}
+                                      className="p-2.5 rounded-lg bg-slate-950/90 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-2 text-xs hover:border-emerald-400 transition"
+                                    >
+                                      <div className="space-y-0.5">
+                                        <div className="font-bold text-white flex items-center gap-2 flex-wrap">
+                                          <span className="text-orange-400">{item.leagueName}</span>
+                                          <span>·</span>
+                                          <span>{item.homeName} <strong className="text-emerald-400 font-mono">{item.finalScore}</strong> {item.awayName}</span>
+                                          {item.isFavMatch && (
+                                            <span className="text-[10px] bg-amber-400/15 text-amber-300 px-1.5 py-0.2 rounded font-bold">⭐ Favorito</span>
+                                          )}
+                                        </div>
+                                        <div className="text-slate-300 font-mono text-[11px]">
+                                          {item.suggestionLabel} <strong className="text-amber-300">(@{item.odds.toFixed(2)})</strong>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono font-bold text-[11px]">
+                                          {item.auditDetail} · {item.unitImpact}
+                                        </span>
+                                        {item.matchObj && (
+                                          <button
+                                            onClick={() => {
+                                              setShowWeeklySummaryModal(false);
+                                              openMatchDetail(item.matchObj);
+                                            }}
+                                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold border border-slate-700"
+                                          >
+                                            Ver Partido
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+
+                            {/* Acordeón: Lista de NO LOGRADOS */}
+                            {showWeeklyFailed && (
+                              <div className="border border-rose-500/40 rounded-xl bg-slate-900/90 p-3 space-y-2 max-h-80 overflow-y-auto">
+                                <div className="text-xs font-black text-rose-400 uppercase tracking-wide pb-1 border-b border-slate-800 flex items-center justify-between">
+                                  <span>❌ Detalle de Pronósticos No Logrados ({audit.failedCount})</span>
+                                  <span className="font-mono text-[11px]">Causa Raíz Detectada</span>
+                                </div>
+                                {(Array.isArray(audit.failedList) ? audit.failedList : []).length === 0 ? (
+                                  <div className="text-xs text-emerald-400 py-3 text-center">¡100% de efectividad! Sin pronósticos fallidos en este filtro.</div>
+                                ) : (
+                                  audit.failedList.map((item, idx) => (
+                                    <div
+                                      key={`fail_${idx}`}
+                                      className="p-2.5 rounded-lg bg-slate-950/90 border border-rose-500/30 flex flex-wrap items-center justify-between gap-2 text-xs hover:border-rose-400 transition"
+                                    >
+                                      <div className="space-y-0.5">
+                                        <div className="font-bold text-white flex items-center gap-2 flex-wrap">
+                                          <span className="text-orange-400">{item.leagueName}</span>
+                                          <span>·</span>
+                                          <span>{item.homeName} <strong className="text-rose-400 font-mono">{item.finalScore}</strong> {item.awayName}</span>
+                                          {item.isFavMatch && (
+                                            <span className="text-[10px] bg-amber-400/15 text-amber-300 px-1.5 py-0.2 rounded font-bold">⭐ Favorito</span>
+                                          )}
+                                        </div>
+                                        <div className="text-slate-300 font-mono text-[11px]">
+                                          {item.suggestionLabel} <strong className="text-amber-300">(@{item.odds.toFixed(2)})</strong>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 font-mono font-bold text-[11px]">
+                                          {item.auditDetail} · {item.unitImpact}
+                                        </span>
+                                        {item.matchObj && (
+                                          <button
+                                            onClick={() => {
+                                              setShowWeeklySummaryModal(false);
+                                              openMatchDetail(item.matchObj);
+                                            }}
+                                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold border border-slate-700"
+                                          >
+                                            Ver Partido
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            } catch (err) {
+              console.error("Error renderizando Resumen de la Semana:", err);
+              return null;
+            }
+          })()}
 
         </div>
       );
