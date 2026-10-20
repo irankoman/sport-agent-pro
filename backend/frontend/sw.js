@@ -1,8 +1,8 @@
-const CACHE_NAME = 'sport-agent-v-clean_rosters_v17';
+const CACHE_NAME = 'sport-agent-v-clean_rosters_v18';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/app.js?v=clean_rosters_v17',
+  '/app.js?v=clean_rosters_v18',
   '/icon-192.png',
   '/icon-512.png',
   '/icon.svg'

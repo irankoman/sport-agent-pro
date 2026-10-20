@@ -79,20 +79,18 @@ def get_live_roster_unified(
     team_name: str, 
     league_code: str, 
     raw_athletes: List[Dict[str, Any]], 
-    props_data: Optional[Any] = None
+    props_data: Optional[Any] = None,
+    recent_suspensions: Optional[Dict[str, str]] = None
 ) -> Tuple[List[Dict[str, Any]], Set[str]]:
     """
     Cruza en tiempo real lesiones y sanciones de ESPN API con las alertas disciplinarias
-    del motor superior (PlayerPropsEngine), garantizando bajo consumo de RAM.
+    del motor superior (PlayerPropsEngine) y expulsiones de la jornada anterior.
+    Regla estricta: 'Apercibido' es DISCIPLINA (En Riesgo), NUNCA expulsado ni excluido del XI.
     """
     bajas: List[Dict[str, Any]] = []
     unavailable_norms: Set[str] = set()
     props_lookup = _build_props_lookup(props_data)
-
-    SUSPENSION_KEYWORDS = (
-        "susp", "red card", "yellow", "ban", "ineligible", 
-        "sancion", "expuls", "acumulacion", "disciplinary", "tarjeta"
-    )
+    recent_susp = recent_suspensions or {}
 
     for a in (raw_athletes or []):
         if not isinstance(a, dict):
@@ -116,6 +114,12 @@ def get_live_roster_unified(
         suspension_reason = "Sanción disciplinaria oficial"
         return_text = "En recuperación"
 
+        # 0. Verificar si fue expulsado por roja en la jornada anterior
+        if norm_name in recent_susp:
+            is_suspended = True
+            suspension_reason = recent_susp[norm_name]
+            return_text = "Fuera por: 1 partido"
+
         # 1. Analizar arreglo 'injuries' de ESPN
         injuries = athlete_data.get("injuries") or a.get("injuries") or []
         for inj in injuries:
@@ -128,7 +132,10 @@ def get_live_roster_unified(
             
             combined_inj_text = f"{inj_status} {inj_type} {inj_comment}".lower()
             
-            if any(k in combined_inj_text for k in SUSPENSION_KEYWORDS):
+            if any(k in combined_inj_text for k in ("apercibido", "a 1 tarjeta", "riesgo", "al limite")):
+                is_warned = True
+                suspension_reason = inj_comment or inj_type or "Apercibido: A 1 tarjeta de suspensión"
+            elif any(k in combined_inj_text for k in ("red card", "expuls", "ban", "ineligible", "sancion disciplinaria", "suspended")):
                 is_suspended = True
                 suspension_reason = inj_comment or inj_type or "Suspendido (Reporte oficial)"
                 return_text = "Fuera por sanción"
@@ -142,7 +149,11 @@ def get_live_roster_unified(
         # 2. Analizar objeto 'status' y banderas directas del jugador
         status_raw = athlete_data.get("status") or a.get("status") or {}
         status_text = str(status_raw).lower()
-        if any(k in status_text for k in SUSPENSION_KEYWORDS):
+        if any(k in status_text for k in ("apercibido", "a 1 tarjeta", "riesgo", "al limite")):
+            is_warned = True
+            if isinstance(status_raw, dict):
+                suspension_reason = status_raw.get("detail") or status_raw.get("name") or "Apercibido: A 1 tarjeta de suspensión"
+        elif any(k in status_text for k in ("red card", "expuls", "ban", "ineligible", "sancion", "suspended")):
             is_suspended = True
             if isinstance(status_raw, dict):
                 suspension_reason = status_raw.get("detail") or status_raw.get("name") or suspension_reason
@@ -153,27 +164,32 @@ def get_live_roster_unified(
         # 3. Cruce directo con el motor superior (PlayerPropsEngine)
         p_props = _match_player_in_props(norm_name, props_lookup)
         if p_props:
-            if any(p_props.get(k) for k in ("suspended", "is_suspended", "sancionado", "tarjeta_roja", "red_card", "expulsado", "out_suspended")):
+            prop_alert = str(p_props.get("alert") or p_props.get("alert_text") or p_props.get("reason") or "").lower()
+            is_prop_warn = any(p_props.get(k) for k in ("apercibido", "at_risk", "warning", "yellow_warning", "riesgo_amarilla"))
+            if any(k in prop_alert for k in ("apercibido", "a 1 tarjeta", "riesgo", "al limite")):
+                is_prop_warn = True
+
+            if is_prop_warn:
+                is_warned = True
+                is_suspended = False  # REGLA ESTRICTA: Apercibido NUNCA es expulsado ni suspendido
+                suspension_reason = p_props.get("warning_reason") or p_props.get("alert") or "Apercibido: A 1 tarjeta de suspensión"
+            elif any(p_props.get(k) for k in ("suspended", "is_suspended", "sancionado", "tarjeta_roja", "red_card", "expulsado", "out_suspended")):
                 is_suspended = True
                 suspension_reason = (
                     p_props.get("suspension_reason") 
                     or p_props.get("reason") 
-                    or p_props.get("alert_text") 
+                    or p_props.get("alert") 
                     or "Sanción por acumulación de tarjetas / Roja"
                 )
                 return_text = p_props.get("matches_out") or "Fuera por: 1 partido"
-            elif any(p_props.get(k) for k in ("apercibido", "at_risk", "warning", "yellow_warning", "riesgo_amarilla")):
-                is_warned = True
-                yellow_count = p_props.get("yellow_cards") or p_props.get("amarillas") or ""
-                extra_info = f" ({yellow_count} TA)" if yellow_count else ""
-                suspension_reason = p_props.get("warning_reason") or f"Apercibido: A 1 amarilla de suspensión{extra_info}"
 
             if any(p_props.get(k) for k in ("injured", "is_injured", "lesionado", "baja_medica")):
                 has_injury = True
                 injury_detail = p_props.get("injury_reason") or injury_detail
 
         # 4. Construcción de las tarjetas de salida
-        if has_injury or is_suspended:
+        # Regla estricta: Solo se agrega a unavailable_norms si es baja real (lesión o suspensión) y NO apercibido
+        if (has_injury or is_suspended) and not is_warned:
             unavailable_norms.add(norm_name)
 
         if is_suspended:
@@ -206,11 +222,22 @@ def get_live_roster_unified(
                 "expectedReturn": "Disponible (Al límite de tarjetas)"
             })
 
-    # 5. FORZAR INYECCIÓN DIRECTA DESDE PROPS (Garantiza que Vinícius u otros sancionados aparezcan sí o sí)
+    # 5. Inyección de expulsados recientes si no estaban en raw_athletes
+    for susp_norm, susp_reason in recent_susp.items():
+        if not any(susp_norm in _normalize_name(b["name"]) or _normalize_name(b["name"]) in susp_norm for b in bajas):
+            unavailable_norms.add(susp_norm)
+            bajas.append({
+                "name": susp_norm.title(),
+                "pos": "DF",
+                "type": "SUSPENSIÓN",
+                "badge": "🟥 Sancionado / Expulsado",
+                "reason": susp_reason,
+                "expectedReturn": "Fuera por: 1 partido"
+            })
+
+    # 6. FORZAR INYECCIÓN DIRECTA DESDE PROPS
     existing_norms = {_normalize_name(b["name"]) for b in bajas}
-    
     if props_data:
-        # Normalizar props_data si viene en diferentes estructuras
         flat_props = props_data
         if isinstance(props_data, dict):
             for k_container in ("players", "props", "data", "athletes", "match_props"):
@@ -229,20 +256,16 @@ def get_live_roster_unified(
                 continue
                 
             norm_p_name = _normalize_name(p_name)
+            p_alert = str(p.get("alert") or p.get("reason") or p.get("alert_text") or "").lower()
             
-            # Comprobar si tiene indicadores de suspensión, roja o expulsión
-            is_prop_suspended = any(p.get(k) for k in (
+            is_prop_warn = any(p.get(k) for k in ("apercibido", "at_risk", "warning", "yellow_warning", "riesgo_amarilla")) or any(k in p_alert for k in ("apercibido", "a 1 tarjeta", "riesgo", "al limite"))
+            is_prop_suspended = (not is_prop_warn) and any(p.get(k) for k in (
                 "suspended", "is_suspended", "sancionado", "tarjeta_roja", 
                 "red_card", "expulsado", "out_suspended", "suspendido"
-            ))
-            
-            is_prop_warned = any(p.get(k) for k in (
-                "apercibido", "at_risk", "warning", "yellow_warning", "riesgo_amarilla"
             ))
 
             if is_prop_suspended:
                 unavailable_norms.add(norm_p_name)
-                # Evitar duplicados si ya se había agregado
                 if not any(norm_p_name in _normalize_name(b["name"]) or _normalize_name(b["name"]) in norm_p_name for b in bajas):
                     bajas.append({
                         "name": p_name,
@@ -252,14 +275,14 @@ def get_live_roster_unified(
                         "reason": p.get("suspension_reason") or p.get("reason") or "Sanción disciplinaria oficial / Roja",
                         "expectedReturn": p.get("matches_out") or "Fuera por: 1 partido"
                     })
-            elif is_prop_warned:
+            elif is_prop_warn:
                 if not any(norm_p_name in _normalize_name(b["name"]) or _normalize_name(b["name"]) in norm_p_name for b in bajas):
                     bajas.append({
                         "name": p_name,
                         "pos": str(p.get("pos") or p.get("position") or "MF").upper(),
                         "type": "DISCIPLINA",
                         "badge": "🟨 Apercibido (En Riesgo)",
-                        "reason": p.get("warning_reason") or "Acumulación de tarjetas amarillas",
+                        "reason": p.get("warning_reason") or p.get("alert") or "Acumulación de tarjetas amarillas",
                         "expectedReturn": "Disponible (Al límite)"
                     })
 
@@ -286,6 +309,16 @@ def norm_player_name(name: str) -> str:
     t = unicodedata.normalize('NFKD', str(name)).encode('ASCII', 'ignore').decode('utf-8').lower()
     return re.sub(r'[^a-z0-9]', '', t)
 
+def sort_athletes_by_seniority(ath_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Prioriza futbolistas senior establecidos (edad >= 20) sobre reservas juveniles (edad < 20)."""
+    def _rank(a):
+        if not isinstance(a, dict):
+            return (2, 0)
+        age = a.get("age") or 0
+        is_senior = 0 if age >= 20 else 1
+        return (is_senior, -age)
+    return sorted(ath_list or [], key=_rank)
+
 
 class MultiSourceRosterEngine:
     """
@@ -306,6 +339,9 @@ class MultiSourceRosterEngine:
     _SCOREBOARD_ATHLETES_SEED: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     # Caché de titulares recientes (últimos 2 partidos jugados en ESPN): (league_code, team_id) -> (timestamp, starters_list)
     _RECENT_STARTERS_CACHE: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+    # Caché de expulsados por tarjeta roja del último partido: (league_code, team_id) -> (timestamp, {norm_name: reason})
+    _SUSPENSIONS_CACHE: Dict[Tuple[str, str], Tuple[float, Dict[str, str]]] = {}
+    SUSPENSIONS_TTL_SECONDS = 6 * 3600  # 6 horas de TTL en memoria (mínimo RAM)
 
     @staticmethod
     def _normalize_name(text: str) -> str:
@@ -461,7 +497,9 @@ class MultiSourceRosterEngine:
             if (time.time() - ts) < cls.RECENT_STARTERS_TTL_SECONDS and cached_st:
                 return cached_st
         if cls._FAST_NON_BLOCKING_MODE:
-            return cls._RECENT_STARTERS_CACHE.get(key, (0.0, []))[1]
+            if key in cls._RECENT_STARTERS_CACHE:
+                return cls._RECENT_STARTERS_CACHE[key][1]
+            timeout = 1.8
 
         url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l_code}/teams/{t_id}/schedule"
         try:
@@ -483,6 +521,79 @@ class MultiSourceRosterEngine:
         except Exception:
             pass
         return cls._RECENT_STARTERS_CACHE.get(key, (0.0, []))[1]
+
+    @classmethod
+    def _fetch_team_recent_suspensions(cls, league_code: str, team_id: str, timeout: float = 3.5) -> Dict[str, str]:
+        """
+        Consulta universal del último partido oficial del club en cualquier liga (esp.1, eng.1, etc.)
+        para detectar futbolistas expulsados con tarjeta roja directa o doble amarilla.
+        Caché en memoria de 6 horas (pocos bytes) para optimizar memoria en Render.
+        Retorna: {norm_player_name: "Expulsado por Tarjeta Roja en la jornada anterior"}
+        """
+        if not league_code or not team_id:
+            return {}
+        key = (str(league_code), str(team_id))
+        now = time.time()
+        if key in cls._SUSPENSIONS_CACHE:
+            ts, cached_susp = cls._SUSPENSIONS_CACHE[key]
+            if (now - ts) < cls.SUSPENSIONS_TTL_SECONDS:
+                return cached_susp
+
+        suspensions: Dict[str, str] = {}
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/teams/{team_id}/schedule"
+        try:
+            res = _ROSTER_HTTP_SESSION.get(url, timeout=timeout)
+            if res.status_code == 200:
+                events = res.json().get("events") or []
+                completed_events = []
+                for ev in events:
+                    comp = (ev.get("competitions") or [{}])[0]
+                    st_type = comp.get("status", {}).get("type", {})
+                    is_completed = bool(st_type.get("completed") or st_type.get("state") == "post")
+                    if is_completed:
+                        eid = str(ev.get("id") or "")
+                        if eid.isdigit():
+                            completed_events.append((eid, comp))
+
+                if completed_events:
+                    last_eid, last_comp = completed_events[-1]
+                    for d in (last_comp.get("details") or []):
+                        if not isinstance(d, dict):
+                            continue
+                        d_team_id = str((d.get("team") or {}).get("id") or "")
+                        if d_team_id and d_team_id != str(team_id):
+                            continue
+                        t_text = str((d.get("type") or {}).get("text") or (d.get("type") or {}).get("type") or "").lower()
+                        is_red = bool(d.get("redCard") or "red card" in t_text or "second yellow" in t_text or "red-card" in t_text)
+                        if is_red:
+                            for ath in (d.get("athletesInvolved") or []):
+                                a_name = ath.get("displayName") or ath.get("shortName")
+                                if a_name:
+                                    suspensions[_normalize_name(a_name)] = "Expulsado por Tarjeta Roja en la jornada anterior"
+
+                    if not suspensions and last_eid:
+                        s_data = cls._fetch_single_summary(league_code, last_eid, timeout=timeout)
+                        if s_data and isinstance(s_data, dict):
+                            key_events = s_data.get("keyEvents") or s_data.get("details") or []
+                            for ev_d in key_events:
+                                if not isinstance(ev_d, dict):
+                                    continue
+                                ev_team_id = str((ev_d.get("team") or {}).get("id") or "")
+                                if ev_team_id and ev_team_id != str(team_id):
+                                    continue
+                                t_text = str((ev_d.get("type") or {}).get("text") or (ev_d.get("type") or {}).get("type") or "").lower()
+                                is_red = bool(ev_d.get("redCard") or "red card" in t_text or "second yellow" in t_text or "red-card" in t_text)
+                                if is_red:
+                                    for part in (ev_d.get("participants") or ev_d.get("athletesInvolved") or []):
+                                        ath = part.get("athlete", part) if isinstance(part.get("athlete"), dict) else part
+                                        a_name = ath.get("displayName") or ath.get("name") or ath.get("shortName")
+                                        if a_name:
+                                            suspensions[_normalize_name(a_name)] = "Expulsado por Tarjeta Roja en la jornada anterior"
+        except Exception as e:
+            logger.debug(f"Aviso consultando expulsiones recientes ({league_code}, {team_id}): {e}")
+
+        cls._SUSPENSIONS_CACHE[key] = (now, suspensions)
+        return suspensions
 
     @classmethod
     def _fetch_single_summary(cls, l_code: str, event_id: str, timeout: float = 5.0, force: bool = False) -> Optional[Dict[str, Any]]:
@@ -880,13 +991,14 @@ class MultiSourceRosterEngine:
                 logger.debug(f"Aviso: No se pudo obtener noticias complementarias para {team_name}: {e}")
 
             # 2) Unificación de disciplina, lesiones e inactivos con sincronización de tarjetas y props
-            bajas, unavail_set = get_live_roster_unified(team_name, l_code, raw_athletes, props_data=props_data)
+            recent_susp = cls._fetch_team_recent_suspensions(l_code, t_id) if (l_code and t_id) else {}
+            bajas, unavail_set = get_live_roster_unified(team_name, l_code, raw_athletes, props_data=props_data, recent_suspensions=recent_susp)
             unavailable_norms = set(unavail_set)
 
             # 3) Cruzar en orden de prioridad: Líderes activos de temporada + Titulares recientes (últimos 2 PJ) + Plantilla activa
             combined_candidates = []
             seen_cand_norms = set()
-            for source_list in (season_leaders_list, recent_starters_list, raw_athletes):
+            for source_list in (recent_starters_list, season_leaders_list, sort_athletes_by_seniority(raw_athletes)):
                 for a in (source_list or []):
                     if not isinstance(a, dict):
                         continue
@@ -924,43 +1036,44 @@ class MultiSourceRosterEngine:
         active_gk = gks[0] if gks else f"Portero Titular de {team_name}"
         backup_gk = official_bench[0]["name"] if (has_official_lineup and official_bench) else (gks[1] if len(gks) > 1 else active_gk)
 
-        # Respaldo de futbolistas reales del plantel para evitar cadenas genéricas
-        real_season_fws = [a.get("displayName") or a.get("name") for a in raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["F", "ST", "CF", "W"])]
-        real_season_mfs = [a.get("displayName") or a.get("name") for a in raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["M", "AM", "CM", "LM", "RM", "DM"])]
-        real_season_dfs = [a.get("displayName") or a.get("name") for a in raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["D", "CB", "LB", "RB", "WB"])]
+        # Respaldo ordenado por antigüedad de futbolistas reales del plantel
+        sorted_raw_athletes = sort_athletes_by_seniority(raw_athletes)
+        real_season_fws = [a.get("displayName") or a.get("name") for a in sorted_raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["F", "ST", "CF", "W"])]
+        real_season_mfs = [a.get("displayName") or a.get("name") for a in sorted_raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["M", "AM", "CM", "LM", "RM", "DM"])]
+        real_season_dfs = [a.get("displayName") or a.get("name") for a in sorted_raw_athletes if isinstance(a, dict) and any(c in ((a.get("position", {}) or {}).get("abbreviation", "")).upper() for c in ["D", "CB", "LB", "RB", "WB"])]
         real_all_outfield = [
             a.get("displayName") or a.get("name")
-            for a in raw_athletes
+            for a in sorted_raw_athletes
             if isinstance(a, dict) and (a.get("displayName") or a.get("name")) and not ((a.get("position", {}) or {}).get("abbreviation", "")).upper().startswith("G")
         ]
 
         def _pick_real_player(candidates: list, pool1: list, pool2: list, pool3: list, used: set, fallback_prefix: str) -> str:
             for p in candidates:
-                if p and p not in used:
+                if p and p not in used and norm_player_name(p) not in unavailable_norms:
                     used.add(p)
                     return p
             for p in pool1:
-                if p and p not in used:
+                if p and p not in used and norm_player_name(p) not in unavailable_norms:
                     used.add(p)
                     return p
             for p in pool2:
-                if p and p not in used:
+                if p and p not in used and norm_player_name(p) not in unavailable_norms:
                     used.add(p)
                     return p
             for p in pool3:
-                if p and p not in used:
+                if p and p not in used and norm_player_name(p) not in unavailable_norms:
                     used.add(p)
                     return p
-            # Si no hay más jugadores únicos en el plantel
             for p in (candidates + pool1 + pool2 + pool3):
-                if p:
+                if p and norm_player_name(p) not in unavailable_norms:
                     return p
             return f"{fallback_prefix} de {team_name}"
 
-        used_scorers = set()
-        p1 = _pick_real_player(fws, mfs, real_season_fws, real_all_outfield, used_scorers, "Atacante Titular")
-        p2 = _pick_real_player(fws, mfs, real_season_fws, real_all_outfield, used_scorers, "Segundo Atacante")
-        p3 = _pick_real_player(mfs, fws, real_season_mfs, real_all_outfield, used_scorers, "Mediocampista Ofensivo")
+        # Conjunto unificado de jugadores utilizados para garantizar atletas 100% únicos en todas las tarjetas
+        used_all_team_players = set()
+        p1 = _pick_real_player(fws, mfs, real_season_fws, real_all_outfield, used_all_team_players, "Atacante Titular")
+        p2 = _pick_real_player(fws, mfs, real_season_fws, real_all_outfield, used_all_team_players, "Segundo Atacante")
+        p3 = _pick_real_player(mfs, fws, real_season_mfs, real_all_outfield, used_all_team_players, "Mediocampista Ofensivo")
 
         p1_inherited = bool(benched_star)
         p1_role = f"Pateador N°1 Titular de {team_name} (Hereda Penales)" if p1_inherited else f"Pateador N°1 de {team_name} (Penales)"
@@ -1023,8 +1136,7 @@ class MultiSourceRosterEngine:
 
         # Tarjetas / Disciplina Reales (100% Defenders y Midfielders de contención, CERO PORTEROS)
         cards = []
-        used_card_players = set()
-        c1 = _pick_real_player(dfs, mfs, real_season_dfs, real_all_outfield, used_card_players, "Defensa Central")
+        c1 = _pick_real_player(dfs, mfs, real_season_dfs, real_all_outfield, used_all_team_players, "Defensa Central")
         cards.append({
             "name": c1,
             "role": f"Zaguero Central de {team_name}",
@@ -1040,7 +1152,7 @@ class MultiSourceRosterEngine:
             "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
-        c2 = _pick_real_player(dfs, mfs, real_season_dfs, real_all_outfield, used_card_players, "Marcador de Banda")
+        c2 = _pick_real_player(dfs, mfs, real_season_dfs, real_all_outfield, used_all_team_players, "Marcador de Banda")
         cards.append({
             "name": c2,
             "role": f"Marcador de Banda de {team_name}",
@@ -1056,7 +1168,7 @@ class MultiSourceRosterEngine:
             "lineupStatus": lineup_status_code,
             "starterStatus": "TITULAR" if has_official_lineup else "PROBABLE"
         })
-        c3 = _pick_real_player(mfs, dfs, real_season_mfs, real_all_outfield, used_card_players, "Volante de Contención")
+        c3 = _pick_real_player(mfs, dfs, real_season_mfs, real_all_outfield, used_all_team_players, "Volante de Contención")
         cards.append({
             "name": c3,
             "role": f"Pivote de Recuperación de {team_name}",

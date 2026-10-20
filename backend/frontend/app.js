@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=turbo_speed_v14')
+        navigator.serviceWorker.register('/sw.js?v=turbo_speed_v15')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=turbo_speed_v14')
+            navigator.serviceWorker.register('/service-worker.js?v=turbo_speed_v15')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -4400,7 +4400,7 @@
                                             <span className="text-[9px] font-bold text-sky-400 uppercase truncate block">{qm.category}</span>
                                             <span className="text-[11px] font-extrabold text-white truncate block mt-0.5" title={qm.market}>{qm.market}</span>
                                             <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-slate-800/80 font-mono">
-                                              <span className="text-xs font-black text-orange-400">@{Number(qm.odds || 1.50).toFixed(2)}</span>
+                                              <span className="text-xs font-black text-orange-400">{Number(qm.odds || 1.50).toFixed(2)}</span>
                                               <span className="text-[9px] text-emerald-400 font-bold">{isAdded ? '✓ En Cupón' : `${qm.prob}% IA`}</span>
                                             </div>
                                           </button>
@@ -4433,7 +4433,7 @@
                                         </div>
                                         <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between font-mono">
                                           <div className="flex items-center gap-1.5">
-                                            <span className="text-sm font-black text-orange-400">@{pick.odds.toFixed(2)}</span>
+                                            <span className="text-sm font-black text-orange-400">{pick.odds.toFixed(2)}</span>
                                             <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">Ref. Betano</span>
                                           </div>
                                           <span className="text-[11px] text-emerald-400 font-bold">{pick.prob}% IA</span>

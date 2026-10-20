@@ -999,6 +999,7 @@ class RealSportsService:
 
         processed_matches = []
         seen_ids = set()
+        league_match_counts = {}
 
         import re
         MultiSourceRosterEngine._FAST_NON_BLOCKING_MODE = True
@@ -1079,11 +1080,14 @@ class RealSportsService:
                         if g_officials and isinstance(g_officials[0], dict):
                             api_official = g_officials[0].get("displayName") or g_officials[0].get("fullName") or ""
 
+            league_idx = league_match_counts.get(l_key, 0)
+            league_match_counts[l_key] = league_idx + 1
+
             ref_stats = RefereeEngine.resolve_official_for_fixture(
-                league_key=l_key,
+                league_key=espn_league_code or l_key,
                 fixture_id=ev_id,
                 official_from_api=api_official,
-                match_index=len(processed_matches),
+                match_index=league_idx,
                 team_names=f"{home_name} vs {away_name}"
             )
 

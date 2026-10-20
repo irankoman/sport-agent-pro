@@ -463,16 +463,17 @@ class DeepStatsEngine:
                 m_tag = str((pl.get("mental") or {}).get("tag", "")).lower()
                 m_psych = str((pl.get("mental") or {}).get("psychology", "")).lower()
                 comb_text = f"{m_tag} {m_psych}"
-                if any(w in comb_text for w in ("apercibido", "suspens", "sancion", "expuls", "tarjeta roja")):
+                if any(w in comb_text for w in ("apercibido", "a 1 tarjeta", "suspens", "sancion", "expuls", "tarjeta roja")):
                     if p_norm not in known_norms:
                         known_norms.add(p_norm)
-                        is_susp = any(w in comb_text for w in ("suspens", "sancion", "expuls", "tarjeta roja"))
+                        is_warned = any(w in comb_text for w in ("apercibido", "a 1 tarjeta", "riesgo", "al limite"))
+                        is_susp = (not is_warned) and any(w in comb_text for w in ("expuls", "tarjeta roja", "sancion", "suspendido"))
                         updated.append({
                             "name": p_name,
                             "pos": pl.get("pos", default_pos)[:2].upper() if pl.get("pos") else default_pos,
                             "type": "SUSPENSIÓN" if is_susp else "DISCIPLINA",
                             "badge": "🟥 Sancionado / Expulsado" if is_susp else "🟨 Apercibido (En Riesgo)",
-                            "reason": (pl.get("mental") or {}).get("tag") or "Apercibido / Riesgo disciplinario",
+                            "reason": (pl.get("mental") or {}).get("tag") or ("Sanción disciplinaria" if is_susp else "Apercibido / Riesgo de suspensión"),
                             "expectedReturn": "Fuera por: 1 partido" if is_susp else "Disponible (Al límite de tarjetas)",
                             "replacement": "Reemplazo titular en plantilla"
                         })
