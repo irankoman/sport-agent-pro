@@ -626,7 +626,7 @@ class MultiSourceRosterEngine:
 
         else:
             # Fase A - XI Probable Inteligente:
-            # 1) Primero detectar todos los jugadores lesionados (`injuries`) o con estado inactivo (`status != active`)
+            # 1) Primero detectar todos los jugadores lesionados (`injuries`), suspendidos o con estado inactivo (`status != active`)
             unavailable_norms = set()
             for a in raw_athletes:
                 if not isinstance(a, dict):
@@ -636,18 +636,35 @@ class MultiSourceRosterEngine:
                     continue
                 pos_code = (a.get("position", {}) or {}).get("abbreviation", "M").upper()
                 injuries = a.get("injuries") or []
-                status_obj = a.get("status")
+                status_obj = a.get("status") if isinstance(a.get("status"), dict) else {"type": str(a.get("status", ""))}
+                
+                # Validación cruzada ampliada de suspensión y disciplina
+                is_suspended = False
+                suspension_reason = ""
+                matches_out = "1 partido"
+                
+                # 1. Analizar texto y claves del estado del jugador
+                status_text = str(status_obj).lower()
+                if any(k in status_text for k in ["susp", "red", "yellow", "ban", "ineligible", "suspended", "sancion"]):
+                    is_suspended = True
+                    suspension_reason = status_obj.get("detail") or status_obj.get("description") or "Sanción disciplinaria / Comité de competición"
+                
+                # 2. Revisar nodos alternativos de tarjetas o disciplina si la API los incluye
+                cards_info = a.get("cards") or a.get("disciplinary") or []
+                if cards_info and not is_suspended:
+                    for card in cards_info:
+                        if isinstance(card, dict) and (str(card.get("type")).lower() in ["red", "roja"] or card.get("accumulated") is True):
+                            is_suspended = True
+                            suspension_reason = "Suspendido por expulsión previa o acumulación de tarjetas"
+
                 is_inactive = False
-                if isinstance(status_obj, dict):
-                    st_type = str(status_obj.get("type") or status_obj.get("name") or "active").lower()
-                    if st_type not in ("active", "available", "probable", ""):
-                        is_inactive = True
-                elif isinstance(status_obj, str) and status_obj.lower() not in ("active", "available", "probable", ""):
+                st_type = str(status_obj.get("type", "active")).lower()
+                if st_type not in ("active", "available", "probable", "") and not is_suspended:
                     is_inactive = True
-                if a.get("active") is False:
+                if a.get("active") is False and not is_suspended:
                     is_inactive = True
 
-                if injuries or is_inactive:
+                if injuries or is_inactive or is_suspended:
                     unavailable_norms.add(norm_player_name(name))
                     if injuries:
                         inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
@@ -659,6 +676,15 @@ class MultiSourceRosterEngine:
                             "badge": "❌ Baja por Lesión",
                             "reason": detail or "Lesión en evaluación médica oficial",
                             "expectedReturn": "En recuperación"
+                        })
+                    elif is_suspended:
+                        bajas.append({
+                            "name": name,
+                            "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
+                            "type": "SUSPENSIÓN",
+                            "badge": "🟥 Sancionado",
+                            "reason": suspension_reason,
+                            "expectedReturn": f"Fuera por: {matches_out}"
                         })
 
             # 2) Cruzar en orden de prioridad: Líderes activos de temporada + Titulares recientes (últimos 2 PJ) + Plantilla activa
