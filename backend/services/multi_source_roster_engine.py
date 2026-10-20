@@ -413,7 +413,7 @@ class MultiSourceRosterEngine:
     # EXTRACCIÓN 100% EN VIVO DE PLANTILLAS DESDE ESPN (MOTOR 2 FASES)
     # ---------------------------------------------------------------------
     @classmethod
-    def get_live_roster(cls, team_name: str, league_code: str = "", team_id: str = "", event_id: str = "") -> Dict[str, Any]:
+    def get_live_roster(cls, team_name: str, league_code: str = "", team_id: str = "", event_id: str = "", props_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Descarga y analiza en vivo la plantilla oficial actual desde la API de ESPN:
         - Fase A (lineupStatus: 'probable'): Cruza titulares recientes (últimos 2 PJ) + líderes activos de temporada
@@ -635,7 +635,7 @@ class MultiSourceRosterEngine:
             except Exception as e:
                 logger.debug(f"Aviso: No se pudo obtener noticias complementarias para {team_name}: {e}")
 
-            # 2) Unificación de disciplina, lesiones e inactivos con sincronización de tarjetas
+            # 2) Unificación de disciplina, lesiones e inactivos con sincronización de tarjetas y props
             unavailable_norms = set()
             for a in raw_athletes:
                 if not isinstance(a, dict):
@@ -652,20 +652,20 @@ class MultiSourceRosterEngine:
                 badge_text = "❌ Baja por Lesión"
                 return_text = "En recuperación"
                 
-                # 1. Verificar lesiones físicas directas de la API
+                # 1. Detección de lesiones físicas en la API
                 has_injury = False
-                injury_detail = "Lesión en evaluación médica oficial"
+                injury_detail = "Lesión en evaluación médica"
                 if injuries:
                     has_injury = True
                     inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
                     if isinstance(inj, dict):
                         injury_detail = inj.get("details", {}).get("type") or inj.get("type") or "Baja médica reportada"
 
-                # 2. Detección de suspensión o tarjetas en el estado oficial
+                # 2. Detección oficial de suspensión por tarjetas
                 status_text = str(status_obj).lower()
                 if any(k in status_text for k in ["susp", "red", "yellow", "ban", "ineligible", "suspended", "sancion"]):
                     is_suspended = True
-                    suspension_reason = status_obj.get("detail") or status_obj.get("description") or "Sanción disciplinaria por tarjetas"
+                    suspension_reason = status_obj.get("detail") or "Sanción disciplinaria por tarjetas"
                     badge_text = "🟥 Sancionado"
                     return_text = "Fuera por: 1 partido"
 
@@ -679,16 +679,32 @@ class MultiSourceRosterEngine:
                             badge_text = "🟥 Sancionado"
                             return_text = "Fuera por: 1 partido"
 
-                # 4. Validación cruzada con la fuente complementaria de noticias/prensa (ContextNewsScraper)
-                norm_name = name.lower()
-                for news in news_items:
-                    news_text = str(news).lower()
-                    if norm_name in news_text and any(term in news_text for term in ["sancion", "suspendido", "acumulacion", "tarjeta roja", "baja"]):
-                        is_suspended = True
-                        suspension_reason = "Reporte de prensa / Sanción disciplinaria confirmada"
-                        badge_text = "🟥 Sancionado"
-                        return_text = "Fuera por: 2 partidos" if ("2 partido" in news_text or "dos partido" in news_text) else "Fuera por: 1 partido"
-                        break
+                # 4. Cruce directo con los props y alertas individuales (hereda lo que muestra la tarjeta superior)
+                if props_data and isinstance(props_data, dict):
+                    player_props = props_data.get(name, {})
+                    if not player_props:
+                        for pk, pv in props_data.items():
+                            if norm_player_name(pk) == norm_player_name(name):
+                                player_props = pv
+                                break
+                    if isinstance(player_props, dict):
+                        if player_props.get("apercibido") or player_props.get("suspended") or player_props.get("tarjeta_roja"):
+                            is_suspended = True
+                            suspension_reason = player_props.get("suspension_reason") or "Acumulación de tarjetas / Apercibimiento oficial"
+                            badge_text = "🟥 Sancionado / Apercibido"
+                            return_text = player_props.get("matches_out", "Fuera por: 1 partido")
+
+                # 5. Validación cruzada con la fuente complementaria de noticias/prensa (ContextNewsScraper)
+                if not is_suspended:
+                    norm_name = name.lower()
+                    for news in news_items:
+                        news_text = str(news).lower()
+                        if norm_name in news_text and any(term in news_text for term in ["sancion", "suspendido", "acumulacion", "tarjeta roja", "baja"]):
+                            is_suspended = True
+                            suspension_reason = "Reporte de prensa / Sanción disciplinaria confirmada"
+                            badge_text = "🟥 Sancionado"
+                            return_text = "Fuera por: 2 partidos" if ("2 partido" in news_text or "dos partido" in news_text) else "Fuera por: 1 partido"
+                            break
 
                 is_inactive = False
                 st_type = str(status_obj.get("type", "active")).lower()
@@ -697,7 +713,8 @@ class MultiSourceRosterEngine:
                 if a.get("active") is False and not is_suspended and not has_injury:
                     is_inactive = True
 
-                if has_injury or is_inactive or is_suspended:
+                if has_injury or is_suspended:
+                    unavailable_norms.add(name.lower())
                     unavailable_norms.add(norm_player_name(name))
                     if has_injury:
                         bajas.append({
@@ -717,15 +734,16 @@ class MultiSourceRosterEngine:
                             "reason": suspension_reason,
                             "expectedReturn": return_text
                         })
-                    elif is_inactive:
-                        bajas.append({
-                            "name": name,
-                            "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
-                            "type": "INACTIVO",
-                            "badge": "⚠️ Jugador No Disponible",
-                            "reason": "Fuera de convocatoria / Descanso técnico",
-                            "expectedReturn": "Próxima fecha"
-                        })
+                elif is_inactive:
+                    unavailable_norms.add(norm_player_name(name))
+                    bajas.append({
+                        "name": name,
+                        "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
+                        "type": "INACTIVO",
+                        "badge": "⚠️ Jugador No Disponible",
+                        "reason": "Fuera de convocatoria / Descanso técnico",
+                        "expectedReturn": "Próxima fecha"
+                    })
 
             # 3) Cruzar en orden de prioridad: Líderes activos de temporada + Titulares recientes (últimos 2 PJ) + Plantilla activa
             combined_candidates = []
@@ -988,9 +1006,9 @@ class MultiSourceRosterEngine:
         return not cls.is_goalkeeper(player_name, team_name)
 
     @classmethod
-    def get_team_bajas(cls, team_name: str, fixture_id: str = "", league_code: str = "", team_id: str = "") -> List[Dict[str, Any]]:
-        """Retorna la lista de lesionados o suspendidos confirmados en ESPN."""
-        roster = cls.get_live_roster(team_name, league_code, team_id, fixture_id)
+    def get_team_bajas(cls, team_name: str, fixture_id: str = "", league_code: str = "", team_id: str = "", props_data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Retorna la lista de lesionados o suspendidos confirmados en ESPN y cruzados con props."""
+        roster = cls.get_live_roster(team_name, league_code, team_id, fixture_id, props_data=props_data)
         return roster.get("bajas", [])
 
     @classmethod
