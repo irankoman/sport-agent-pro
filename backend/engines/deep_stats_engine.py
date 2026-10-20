@@ -447,8 +447,39 @@ class DeepStatsEngine:
             }
         ]
 
-        home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, fixture_id, league_code, home_team_id)
-        away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, fixture_id, league_code, away_team_id)
+        # Sincronización estricta de bajas cruzando con player_state (tarjetas, lesiones y props superiores)
+        home_bajas = MultiSourceRosterEngine.get_team_bajas(home_name, fixture_id, league_code, home_team_id, props_data=player_state)
+        away_bajas = MultiSourceRosterEngine.get_team_bajas(away_name, fixture_id, league_code, away_team_id, props_data=player_state)
+
+        # Incorporar a home_bajas y away_bajas cualquier jugador de home_players o away_players que tenga alerta de sanción o apercibimiento
+        def _sync_bajas_from_players(players_list: list, existing_bajas: list, default_pos: str = "MF") -> list:
+            updated = list(existing_bajas)
+            known_norms = {MultiSourceRosterEngine._normalize_name(b.get("name", "")) for b in updated if b.get("name")}
+            for pl in (players_list or []):
+                p_name = pl.get("name")
+                if not p_name:
+                    continue
+                p_norm = MultiSourceRosterEngine._normalize_name(p_name)
+                m_tag = str((pl.get("mental") or {}).get("tag", "")).lower()
+                m_psych = str((pl.get("mental") or {}).get("psychology", "")).lower()
+                comb_text = f"{m_tag} {m_psych}"
+                if any(w in comb_text for w in ("apercibido", "suspens", "sancion", "expuls", "tarjeta roja")):
+                    if p_norm not in known_norms:
+                        known_norms.add(p_norm)
+                        is_susp = any(w in comb_text for w in ("suspens", "sancion", "expuls", "tarjeta roja"))
+                        updated.append({
+                            "name": p_name,
+                            "pos": pl.get("pos", default_pos)[:2].upper() if pl.get("pos") else default_pos,
+                            "type": "SUSPENSIÓN" if is_susp else "DISCIPLINA",
+                            "badge": "🟥 Sancionado / Expulsado" if is_susp else "🟨 Apercibido (En Riesgo)",
+                            "reason": (pl.get("mental") or {}).get("tag") or "Apercibido / Riesgo disciplinario",
+                            "expectedReturn": "Fuera por: 1 partido" if is_susp else "Disponible (Al límite de tarjetas)",
+                            "replacement": "Reemplazo titular en plantilla"
+                        })
+            return updated
+
+        home_bajas = _sync_bajas_from_players(home_players, home_bajas, "DF")
+        away_bajas = _sync_bajas_from_players(away_players, away_bajas, "DF")
 
         squad_radiography = {
             "home": home_players,

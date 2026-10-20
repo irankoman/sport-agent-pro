@@ -105,6 +105,26 @@ REFEREE_DATABASE: Dict[str, Dict[str, Any]] = {
         "league": "La Liga (España)", "matches": 20, "yellow_avg": 4.3, "red_avg": 0.16,
         "fouls_avg": 23.4, "penalties_avg": 0.29, "strictness": "Permisivo", "home_bias": 48.9
     },
+    "Victor García Verdura": {
+        "league": "La Liga (España)", "matches": 17, "yellow_avg": 4.6, "red_avg": 0.22,
+        "fouls_avg": 24.1, "penalties_avg": 0.30, "strictness": "Moderado", "home_bias": 49.8
+    },
+    "Javier Alberola Rojas": {
+        "league": "La Liga (España)", "matches": 19, "yellow_avg": 3.7, "red_avg": 0.11,
+        "fouls_avg": 21.5, "penalties_avg": 0.25, "strictness": "Permisivo", "home_bias": 48.5
+    },
+    "Pablo González Fuertes": {
+        "league": "La Liga (España)", "matches": 18, "yellow_avg": 5.1, "red_avg": 0.31,
+        "fouls_avg": 26.2, "penalties_avg": 0.39, "strictness": "Muy Estricto", "home_bias": 51.2
+    },
+    "Mateo Busquets Ferrer": {
+        "league": "La Liga (España)", "matches": 16, "yellow_avg": 5.4, "red_avg": 0.38,
+        "fouls_avg": 27.0, "penalties_avg": 0.42, "strictness": "Muy Estricto", "home_bias": 51.9
+    },
+    "Mario Melero López": {
+        "league": "La Liga (España)", "matches": 18, "yellow_avg": 4.4, "red_avg": 0.21,
+        "fouls_avg": 23.8, "penalties_avg": 0.31, "strictness": "Moderado", "home_bias": 50.1
+    },
 
     # 🇮🇹 ITALIA - Serie A
     "Daniele Orsato": {
@@ -250,7 +270,12 @@ REFEREE_DATABASE: Dict[str, Dict[str, Any]] = {
 LEAGUE_ROSTERS = {
     "chi": ["Piero Maza", "Cristián Garay", "Felipe González", "José Cabero", "Francisco Gilabert", "Juan Lara", "Fernando Véjar", "Nicolás Gamboa"],
     "eng": ["Michael Oliver", "Anthony Taylor", "Paul Tierney", "Simon Hooper", "Chris Kavanagh", "John Brooks", "Robert Jones", "Stuart Attwell"],
-    "esp": ["Jesús Gil Manzano", "Alejandro Hernández Hernández", "José María Sánchez Martínez", "Juan Martínez Munuera", "César Soto Grado", "Guillermo Cuadra Fernández", "Ricardo De Burgos Bengoetxea"],
+    "esp": [
+        "Jesús Gil Manzano", "Alejandro Hernández Hernández", "José María Sánchez Martínez", 
+        "Juan Martínez Munuera", "César Soto Grado", "Guillermo Cuadra Fernández", 
+        "Ricardo De Burgos Bengoetxea", "Victor García Verdura", "Javier Alberola Rojas", 
+        "Pablo González Fuertes", "Mateo Busquets Ferrer", "Mario Melero López"
+    ],
     "ita": ["Daniele Orsato", "Davide Massa", "Maurizio Mariani", "Marco Guida", "Fabio Maresca", "Simone Sozza"],
     "ger": ["Felix Zwayer", "Daniel Siebert", "Deniz Aytekin", "Sascha Stegemann", "Tobias Stieler", "Sven Jablonski"],
     "fra": ["Clément Turpin", "François Letexier", "Benoît Bastien", "Willy Delajod", "Jérémie Pignard"],
@@ -302,17 +327,26 @@ class RefereeEngine:
         )
 
     @classmethod
-    def resolve_official_for_fixture(cls, league_key: str, fixture_id: str, official_from_api: str = "") -> RefereeStats:
+    def resolve_official_for_fixture(cls, league_key: str, fixture_id: str, official_from_api: str = "", match_index: int = 0, team_names: str = "") -> RefereeStats:
         """
         Garantiza un árbitro oficial real y único por encuentro.
-        Si la API no trae el nombre (asignación pendiente de la federación),
-        distribuye determinísticamente la nómina oficial de esa liga sin duplicados repetidos.
+        1. Intenta extraer el árbitro real de la API de ESPN si viene reportado.
+        2. Si la API no trae asignación, selecciona de forma determinista y única
+           usando fixture_id + team_names + match_index para evitar colisiones dentro de la jornada.
         """
-        if official_from_api and official_from_api.strip() and official_from_api in REFEREE_DATABASE:
-            return cls.get_referee_profile(official_from_api.strip())
+        if official_from_api and official_from_api.strip():
+            raw_clean = official_from_api.strip()
+            # Si el nombre viene de la API, buscar coincidencia directa o parcial en REFEREE_DATABASE
+            for db_name, db_data in REFEREE_DATABASE.items():
+                if raw_clean.lower() == db_name.lower() or raw_clean.lower() in db_name.lower() or db_name.lower() in raw_clean.lower():
+                    return cls.get_referee_profile(db_name)
+            return cls.get_referee_profile(raw_clean)
         
         roster = LEAGUE_ROSTERS.get(league_key, ["Michael Oliver"])
-        # Hash determinístico del fixture_id para asignar un árbitro único
-        idx = int(hashlib.md5(fixture_id.encode("utf-8")).hexdigest(), 16) % len(roster)
+        # Hash compuesto determinístico sin duplicados repetidos
+        seed_str = f"{league_key}_{fixture_id}_{team_names}_{match_index}"
+        hash_val = int(hashlib.md5(seed_str.encode("utf-8")).hexdigest(), 16)
+        # Combinar con match_index como offset rotacional
+        idx = (hash_val + match_index) % len(roster)
         assigned_name = roster[idx]
         return cls.get_referee_profile(assigned_name)

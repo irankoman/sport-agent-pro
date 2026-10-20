@@ -1067,11 +1067,24 @@ class RealSportsService:
 
             # 1. RESOLVER ÁRBITRO OFICIAL ÚNICO Y REAL
             officials = comp.get("officials", [])
-            api_official = officials[0].get("displayName", "") if officials else ""
+            api_official = ""
+            if officials and isinstance(officials[0], dict):
+                api_official = officials[0].get("displayName") or officials[0].get("fullName") or ""
+            if not api_official and espn_league_code and espn_event_id and espn_event_id.isdigit():
+                sum_cache_key = (str(espn_league_code), str(espn_event_id))
+                if sum_cache_key in MultiSourceRosterEngine._SUMMARY_CACHE:
+                    sum_cached = MultiSourceRosterEngine._SUMMARY_CACHE[sum_cache_key][1]
+                    if isinstance(sum_cached, dict):
+                        g_officials = (sum_cached.get("gameInfo") or {}).get("officials") or []
+                        if g_officials and isinstance(g_officials[0], dict):
+                            api_official = g_officials[0].get("displayName") or g_officials[0].get("fullName") or ""
+
             ref_stats = RefereeEngine.resolve_official_for_fixture(
                 league_key=l_key,
                 fixture_id=ev_id,
-                official_from_api=api_official
+                official_from_api=api_official,
+                match_index=len(processed_matches),
+                team_names=f"{home_name} vs {away_name}"
             )
 
             # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL (Betano Consensus Engine Multi-Proveedor)

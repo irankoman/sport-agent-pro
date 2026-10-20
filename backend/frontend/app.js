@@ -1,13 +1,13 @@
     // Registro de Service Worker para PWA instalable con cache-busting estricto
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=turbo_speed_v13')
+        navigator.serviceWorker.register('/sw.js?v=turbo_speed_v14')
           .then((reg) => {
             console.log('PWA ServiceWorker registrado:', reg.scope);
             if (reg.update) { reg.update(); }
           })
           .catch((err) => {
-            navigator.serviceWorker.register('/service-worker.js?v=turbo_speed_v13')
+            navigator.serviceWorker.register('/service-worker.js?v=turbo_speed_v14')
               .then((r) => console.log('SW fallback registrado:', r.scope))
               .catch((e) => console.log('Error SW:', e));
           });
@@ -587,6 +587,20 @@
 
     const STORAGE_KEY_FAVORITES = 'sportagent_favorite_teams_v3';
     const STORAGE_KEY_STARRED_MATCHES = 'sportagent_starred_matches_v3';
+    const STORAGE_KEY_SAVED_BETS = 'sport_agent_saved_bets_v1';
+
+    const loadSavedBets = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_SAVED_BETS);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) {
+        console.error("Error leyendo apuestas guardadas de localStorage:", e);
+      }
+      return [];
+    };
 
     // Normalizador de nombres de equipos para cruce exacto (ignora tildes, guiones, puntos y sufijos FC/CF)
     const normTeamStr = (s) => {
@@ -732,6 +746,11 @@
       const [betSlip, setBetSlip] = useState([]);
       const [stakeCLP, setStakeCLP] = useState(15000);
       const [copySuccess, setCopySuccess] = useState(false);
+
+      // Estado de Apuestas Guardadas en LocalStorage
+      const [savedBets, setSavedBets] = useState(loadSavedBets);
+      const [showSavedBetsModal, setShowSavedBetsModal] = useState(false);
+      const [saveBetSuccess, setSaveBetSuccess] = useState(false);
 
       // Estado de Instalación PWA (Android / iOS)
       const [installPrompt, setInstallPrompt] = useState(null);
@@ -1791,9 +1810,9 @@
             `Árbitro: ${selectedMatch.referee?.name}`,
             `Sincronización Alineaciones: ${lineupMode === 'CONFIRMADO' ? 'ONCE OFICIAL CONFIRMADO' : 'MODO PREVIA'}`,
             `--------------------------------------------------`,
-            ...betSlip.map((b, i) => `${i+1}. [${b.category || b.type}] ${b.market || b.player} (@${b.odds.toFixed(2)})`),
+            ...betSlip.map((b, i) => `${i+1}. [${b.category || b.type}] ${b.market || b.player} (${b.odds.toFixed(2)})`),
             `--------------------------------------------------`,
-            `Cuota Total Betano: @${combinedOdds.toFixed(2)}`,
+            `Cuota Total Betano: ${combinedOdds.toFixed(2)}`,
             `Probabilidad Conjunta IA: ${combinedProb}%`,
             `Monto Sugerido (Kelly): ${formatCLP(stakeCLP)}`,
             `Retorno Potencial: ${formatCLP(stakeCLP * combinedOdds)} CLP`,
@@ -1804,6 +1823,65 @@
         navigator.clipboard.writeText(text);
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2500);
+      };
+
+      // Guardar y administrar apuestas en LocalStorage
+      const saveCurrentBetToStorage = () => {
+        if (betSlip.length === 0) return;
+        try {
+          const now = new Date();
+          const formattedDate = now.toLocaleDateString("es-CL", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+          });
+          const newBet = {
+            id: `bet_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            timestamp: Date.now(),
+            formattedDate,
+            match: selectedMatch ? `${selectedMatch.homeTeam} vs ${selectedMatch.awayTeam}` : 'Multi-Partido',
+            matchId: selectedMatch?.id || '',
+            league: selectedMatch?.leagueName || selectedMatch?.league || '',
+            picks: betSlip.map((b) => ({
+              id: b.id,
+              category: b.category || b.type || 'SELECCIÓN',
+              market: b.market || b.player || '',
+              odds: Number(b.odds) || 1.0,
+              prob: b.prob || null
+            })),
+            combinedOdds: Number(combinedOdds.toFixed(2)),
+            combinedProb: combinedProb,
+            stakeCLP: Number(stakeCLP) || 0,
+            potentialReturn: Math.round(stakeCLP * combinedOdds),
+            netProfit: Math.max(0, Math.round(stakeCLP * combinedOdds - stakeCLP))
+          };
+          const nextList = [newBet, ...savedBets];
+          setSavedBets(nextList);
+          localStorage.setItem(STORAGE_KEY_SAVED_BETS, JSON.stringify(nextList));
+          setSaveBetSuccess(true);
+          setTimeout(() => setSaveBetSuccess(false), 2500);
+        } catch (err) {
+          console.error("Error guardando apuesta:", err);
+        }
+      };
+
+      const deleteSavedBet = (betId) => {
+        const nextList = savedBets.filter((b) => b.id !== betId);
+        setSavedBets(nextList);
+        try {
+          localStorage.setItem(STORAGE_KEY_SAVED_BETS, JSON.stringify(nextList));
+        } catch (e) {}
+      };
+
+      const clearAllSavedBets = () => {
+        if (window.confirm("¿Seguro que deseas eliminar todas las apuestas guardadas?")) {
+          setSavedBets([]);
+          try {
+            localStorage.removeItem(STORAGE_KEY_SAVED_BETS);
+          } catch (e) {}
+        }
       };
 
       // Lista plana de equipos para el modal VIP
@@ -1898,6 +1976,14 @@
                   title="Auditar semanas cerradas y en curso (Archivo Histórico)"
                 >
                   <span>📊 Resumen de la Semana</span>
+                </button>
+
+                <button
+                  onClick={() => setShowSavedBetsModal(true)}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition active:scale-95 shadow"
+                  title="Ver y administrar apuestas guardadas"
+                >
+                  <span>💼 Apuestas Guardadas ({savedBets.length})</span>
                 </button>
 
                 <button
@@ -2298,7 +2384,15 @@
             const shotsAnalytics = activeDeep.shotsAnalytics || {};
             const cornersAndXg = activeDeep.cornersAndXgMatrix || {};
             const h2hAndCards = activeDeep.h2hAndCards || {};
-            const squadRadiography = activeDeep.squadRadiography || {};
+            const squadRadiography = {
+              ...activeDeep.squadRadiography,
+              homeBajas: (activeDeep.squadRadiography?.homeBajas && activeDeep.squadRadiography.homeBajas.length > 0)
+                ? activeDeep.squadRadiography.homeBajas
+                : (selectedMatch?.bajas?.home || selectedMatch?.teamStatus?.home?.bajas || []),
+              awayBajas: (activeDeep.squadRadiography?.awayBajas && activeDeep.squadRadiography.awayBajas.length > 0)
+                ? activeDeep.squadRadiography.awayBajas
+                : (selectedMatch?.bajas?.away || selectedMatch?.teamStatus?.away?.bajas || [])
+            };
             const betBuilderSuggestions = activeDeep.betBuilderSuggestions || [];
 
             return (
@@ -4393,7 +4487,7 @@
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-xs font-black px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 shrink-0 font-mono">
-                                        @{item.odds.toFixed(2)}
+                                        {item.odds.toFixed(2)}
                                       </span>
                                       <button
                                         onClick={(e) => removePickFromSlip(item.id, e)}
@@ -4412,7 +4506,7 @@
                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2 font-mono text-xs">
                               <div className="flex items-center justify-between">
                                 <span className="text-slate-400">Cuota Total Betano:</span>
-                                <span className="text-xl font-black text-orange-400">@{combinedOdds.toFixed(2)}</span>
+                                <span className="text-xl font-black text-orange-400">{combinedOdds.toFixed(2)}</span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <span className="text-slate-400">Probabilidad Conjunta IA:</span>
@@ -4518,6 +4612,16 @@
                               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider transition shadow-lg shadow-orange-500/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {copySuccess ? '✓ ¡Selección Copiada al Portapapeles!' : 'Copiar Selección para Betano'}
+                            </button>
+
+                            {/* Botón Guardar Apuesta en LocalStorage */}
+                            <button
+                              onClick={saveCurrentBetToStorage}
+                              disabled={betSlip.length === 0}
+                              className="w-full mt-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 font-bold text-xs uppercase tracking-wider border border-amber-500/30 flex items-center justify-center gap-1.5 transition shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Guardar esta apuesta en el historial de Apuestas Guardadas"
+                            >
+                              <span>{saveBetSuccess ? '✓ ¡Apuesta Guardada con Éxito!' : '💾 Guardar Apuesta'}</span>
                             </button>
 
                           </div>
@@ -4645,6 +4749,131 @@
                     Guardar y Cerrar
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* MODAL: 💼 APUESTAS GUARDADAS (LOCALSTORAGE)                                */}
+          {/* ========================================================================= */}
+          {showSavedBetsModal && (
+            <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-3 sm:p-5 backdrop-blur-sm" onClick={() => setShowSavedBetsModal(false)}>
+              <div className="bg-slate-900 border border-amber-500/50 rounded-2xl max-w-3xl w-full p-4 sm:p-6 shadow-2xl flex flex-col max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
+                
+                {/* Cabecera del Modal */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">💼</span>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                        <span>Apuestas Guardadas</span>
+                        <span className="text-xs bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded border border-amber-500/30">
+                          {savedBets.length}
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400">Historial y cupones personalizados guardados en tu dispositivo</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowSavedBetsModal(false)}
+                    className="text-slate-400 hover:text-white text-xl p-1 leading-none rounded-lg hover:bg-slate-800 transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Lista de Apuestas */}
+                <div className="my-3 space-y-3 overflow-y-auto pr-1 flex-1">
+                  {savedBets.length === 0 ? (
+                    <div className="text-center py-12 text-slate-500 border border-dashed border-slate-800 rounded-xl p-6">
+                      <span className="text-3xl block mb-2">📋</span>
+                      <p className="text-xs font-bold text-slate-400">No tienes apuestas guardadas aún.</p>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Crea un cupón desde cualquier partido y presiona <strong className="text-amber-400">"💾 Guardar Apuesta"</strong> para conservarlo aquí.
+                      </p>
+                    </div>
+                  ) : (
+                    savedBets.map((bet) => (
+                      <div key={bet.id} className="bg-slate-950 border border-slate-800 hover:border-amber-500/40 rounded-xl p-3.5 space-y-2.5 transition">
+                        {/* Fila superior: Partido, Fecha y Botón Eliminar */}
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                          <div>
+                            <span className="text-xs font-black text-white block">⚽ {bet.match}</span>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5">
+                              <span>📅 {bet.formattedDate}</span>
+                              {bet.league && <span className="text-amber-400/80">• {bet.league}</span>}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => deleteSavedBet(bet.id)}
+                            className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-rose-500/10 transition text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            title="Eliminar esta apuesta"
+                          >
+                            <span>🗑️</span>
+                            <span className="text-[10px] hidden sm:inline">Eliminar</span>
+                          </button>
+                        </div>
+
+                        {/* Selecciones / Picks */}
+                        <div className="space-y-1.5">
+                          {(bet.picks || []).map((pk, pkIdx) => (
+                            <div key={pkIdx} className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex items-center justify-between text-xs">
+                              <div>
+                                <span className="text-[9px] font-bold text-orange-400 uppercase block">{pk.category}</span>
+                                <span className="font-bold text-slate-200 block text-[11px]">{pk.market}</span>
+                              </div>
+                              <span className="font-mono text-orange-300 font-black text-xs shrink-0">
+                                {Number(pk.odds).toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Resumen Financiero y Cuota */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900 border border-slate-800/80 rounded-lg p-2.5 text-center font-mono">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block uppercase">Cuota Total</span>
+                            <span className="text-sm font-black text-amber-400">{Number(bet.combinedOdds).toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 block uppercase">Stake</span>
+                            <span className="text-xs font-bold text-white">{formatCLP(bet.stakeCLP)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 block uppercase">Retorno</span>
+                            <span className="text-xs font-black text-emerald-400">{formatCLP(bet.potentialReturn)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 block uppercase">Ganancia Neta</span>
+                            <span className="text-xs font-black text-emerald-300">+{formatCLP(bet.netProfit)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Pie del Modal */}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-800 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-400">Total: <strong className="text-amber-400 font-mono">{savedBets.length}</strong></span>
+                    {savedBets.length > 0 && (
+                      <button
+                        onClick={clearAllSavedBets}
+                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium cursor-pointer transition"
+                      >
+                        Vaciar todas
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowSavedBetsModal(false)}
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
               </div>
             </div>
           )}
