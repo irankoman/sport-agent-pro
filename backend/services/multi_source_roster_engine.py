@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Optional, Tuple
 import requests
 from requests.adapters import HTTPAdapter
+from backend.services.context_news_scraper import ContextNewsScraper
 
 logger = logging.getLogger(__name__)
 
@@ -626,7 +627,15 @@ class MultiSourceRosterEngine:
 
         else:
             # Fase A - XI Probable Inteligente:
-            # 1) Primero detectar todos los jugadores lesionados (`injuries`), suspendidos o con estado inactivo (`status != active`)
+            # 1) Obtener contexto de noticias / reportes de prensa recientes para capturar sanciones de última hora
+            news_items = []
+            try:
+                scraper = ContextNewsScraper()
+                news_items = scraper.get_team_news(team_name) or []
+            except Exception as e:
+                logger.debug(f"Aviso: No se pudo obtener noticias complementarias para {team_name}: {e}")
+
+            # 2) Unificación de disciplina, lesiones e inactivos con sincronización de tarjetas
             unavailable_norms = set()
             for a in raw_athletes:
                 if not isinstance(a, dict):
@@ -638,43 +647,65 @@ class MultiSourceRosterEngine:
                 injuries = a.get("injuries") or []
                 status_obj = a.get("status") if isinstance(a.get("status"), dict) else {"type": str(a.get("status", ""))}
                 
-                # Validación cruzada ampliada de suspensión y disciplina
                 is_suspended = False
                 suspension_reason = ""
-                matches_out = "1 partido"
+                badge_text = "❌ Baja por Lesión"
+                return_text = "En recuperación"
                 
-                # 1. Analizar texto y claves del estado del jugador
+                # 1. Verificar lesiones físicas directas de la API
+                has_injury = False
+                injury_detail = "Lesión en evaluación médica oficial"
+                if injuries:
+                    has_injury = True
+                    inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
+                    if isinstance(inj, dict):
+                        injury_detail = inj.get("details", {}).get("type") or inj.get("type") or "Baja médica reportada"
+
+                # 2. Detección de suspensión o tarjetas en el estado oficial
                 status_text = str(status_obj).lower()
                 if any(k in status_text for k in ["susp", "red", "yellow", "ban", "ineligible", "suspended", "sancion"]):
                     is_suspended = True
-                    suspension_reason = status_obj.get("detail") or status_obj.get("description") or "Sanción disciplinaria / Comité de competición"
-                
-                # 2. Revisar nodos alternativos de tarjetas o disciplina si la API los incluye
+                    suspension_reason = status_obj.get("detail") or status_obj.get("description") or "Sanción disciplinaria por tarjetas"
+                    badge_text = "🟥 Sancionado"
+                    return_text = "Fuera por: 1 partido"
+
+                # 3. Revisar nodos alternativos de tarjetas o disciplina si la API los incluye
                 cards_info = a.get("cards") or a.get("disciplinary") or []
                 if cards_info and not is_suspended:
                     for card in cards_info:
                         if isinstance(card, dict) and (str(card.get("type")).lower() in ["red", "roja"] or card.get("accumulated") is True):
                             is_suspended = True
                             suspension_reason = "Suspendido por expulsión previa o acumulación de tarjetas"
+                            badge_text = "🟥 Sancionado"
+                            return_text = "Fuera por: 1 partido"
+
+                # 4. Validación cruzada con la fuente complementaria de noticias/prensa (ContextNewsScraper)
+                norm_name = name.lower()
+                for news in news_items:
+                    news_text = str(news).lower()
+                    if norm_name in news_text and any(term in news_text for term in ["sancion", "suspendido", "acumulacion", "tarjeta roja", "baja"]):
+                        is_suspended = True
+                        suspension_reason = "Reporte de prensa / Sanción disciplinaria confirmada"
+                        badge_text = "🟥 Sancionado"
+                        return_text = "Fuera por: 2 partidos" if ("2 partido" in news_text or "dos partido" in news_text) else "Fuera por: 1 partido"
+                        break
 
                 is_inactive = False
                 st_type = str(status_obj.get("type", "active")).lower()
-                if st_type not in ("active", "available", "probable", "") and not is_suspended:
+                if st_type not in ("active", "available", "probable", "") and not is_suspended and not has_injury:
                     is_inactive = True
-                if a.get("active") is False and not is_suspended:
+                if a.get("active") is False and not is_suspended and not has_injury:
                     is_inactive = True
 
-                if injuries or is_inactive or is_suspended:
+                if has_injury or is_inactive or is_suspended:
                     unavailable_norms.add(norm_player_name(name))
-                    if injuries:
-                        inj = injuries[0] if isinstance(injuries, list) and len(injuries) > 0 else {}
-                        detail = inj.get("details", {}).get("type") if isinstance(inj, dict) else "Baja médica reportada"
+                    if has_injury:
                         bajas.append({
                             "name": name,
                             "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
                             "type": "LESIÓN",
                             "badge": "❌ Baja por Lesión",
-                            "reason": detail or "Lesión en evaluación médica oficial",
+                            "reason": injury_detail,
                             "expectedReturn": "En recuperación"
                         })
                     elif is_suspended:
@@ -682,12 +713,21 @@ class MultiSourceRosterEngine:
                             "name": name,
                             "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
                             "type": "SUSPENSIÓN",
-                            "badge": "🟥 Sancionado",
+                            "badge": badge_text,
                             "reason": suspension_reason,
-                            "expectedReturn": f"Fuera por: {matches_out}"
+                            "expectedReturn": return_text
+                        })
+                    elif is_inactive:
+                        bajas.append({
+                            "name": name,
+                            "pos": "GK" if pos_code == "G" else ("DF" if pos_code == "D" else ("FW" if pos_code == "F" else "MF")),
+                            "type": "INACTIVO",
+                            "badge": "⚠️ Jugador No Disponible",
+                            "reason": "Fuera de convocatoria / Descanso técnico",
+                            "expectedReturn": "Próxima fecha"
                         })
 
-            # 2) Cruzar en orden de prioridad: Líderes activos de temporada + Titulares recientes (últimos 2 PJ) + Plantilla activa
+            # 3) Cruzar en orden de prioridad: Líderes activos de temporada + Titulares recientes (últimos 2 PJ) + Plantilla activa
             combined_candidates = []
             seen_cand_norms = set()
             for source_list in (season_leaders_list, recent_starters_list, raw_athletes):

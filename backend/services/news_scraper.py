@@ -61,6 +61,27 @@ class ContextNewsScraper:
         return cls._cached_news
 
     @classmethod
+    def get_team_news(cls, team_name: str) -> List[str]:
+        """
+        Retorna una lista de reportes de noticias / titulares y resúmenes
+        relacionados con el equipo indicado.
+        """
+        clean_team = str(team_name or "").strip().lower()
+        if not clean_team:
+            return []
+        if not cls._cached_news:
+            cls.scrape_latest_headlines()
+
+        matched = []
+        for n in cls._cached_news:
+            t = n.get("title", "")
+            s = n.get("summary", "")
+            full_txt = f"{t} {s}".lower()
+            if clean_team in full_txt:
+                matched.append(f"{t} - {s}")
+        return matched
+
+    @classmethod
     def get_dressing_room_context(cls, team_name: str) -> str:
         """
         Determina el pulso anímico y posibles bajas del equipo analizando
