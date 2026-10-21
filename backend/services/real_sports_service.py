@@ -22,6 +22,15 @@ from backend.engines.player_props_engine import PlayerPropsEngine
 from backend.engines.deep_stats_engine import DeepStatsEngine
 from backend.data.team_rosters import get_team_roster
 from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
+import gc
+from backend.services.core_5_engines import (
+    PlayerEngine,
+    RefereeEngine as CoreRefereeEngine,
+    WeatherStadiumEngine,
+    TeamContextEngine,
+    CorrelationBettingEngine
+)
+from backend.services.context_news_scraper import ContextNewsScraper
 
 # Sesión HTTP compartida con pool de conexiones persistentes
 _SPORTS_HTTP_SESSION = requests.Session()
@@ -301,7 +310,8 @@ class RealSportsService:
                 logging.error(f"Error fetching teams for {l_key}: {e}")
             return l_key, {"leagueName": cfg["name"], "flag": cfg["flag"], "teams": []}
 
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        workers_count = 2 if os.getenv("RENDER") else 4
+        with ThreadPoolExecutor(max_workers=workers_count) as executor:
             futures = [executor.submit(_fetch_teams_for_league, lk, cf) for lk, cf in LEAGUE_CONFIG.items()]
             for f in as_completed(futures):
                 try:
@@ -559,9 +569,9 @@ class RealSportsService:
             top_scs = player_analytics.get("topScorers", [])
             h_scs = [s for s in top_scs if s.get("team") == home_name]
             a_scs = [s for s in top_scs if s.get("team") == away_name]
-            h_p1 = h_scs[0]["name"] if len(h_scs) > 0 else (top_scs[0]["name"] if top_scs else f"Delantero de {home_name}")
-            h_p2 = h_scs[1]["name"] if len(h_scs) > 1 else (top_scs[1]["name"] if len(top_scs) > 1 else f"Extremo de {home_name}")
-            a_p1 = a_scs[0]["name"] if len(a_scs) > 0 else (top_scs[-1]["name"] if top_scs else f"Delantero de {away_name}")
+            h_p1 = h_scs[0]["name"] if len(h_scs) > 0 else (top_scs[0]["name"] if top_scs else "Sin registro")
+            h_p2 = h_scs[1]["name"] if len(h_scs) > 1 else (top_scs[1]["name"] if len(top_scs) > 1 else "Sin registro")
+            a_p1 = a_scs[0]["name"] if len(a_scs) > 0 else (top_scs[-1]["name"] if top_scs else "Sin registro")
             
             for i in range(h_s):
                 m_sc = h_p1 if i == 0 else h_p2
@@ -937,7 +947,8 @@ class RealSportsService:
 
         # 1. Descargar las 9 ligas en PARALELO con pool de conexiones persistentes (timeout=6s)
         tasks = []
-        with ThreadPoolExecutor(max_workers=20) as executor:
+        workers_count = 2 if os.getenv("RENDER") else 4
+        with ThreadPoolExecutor(max_workers=workers_count) as executor:
             for l_key, cfg in LEAGUE_CONFIG.items():
                 espn_code = cfg["espn_code"]
                 for d_str in days_to_check:
@@ -1066,30 +1077,19 @@ class RealSportsService:
             venue_name = venue.get("fullName", f"Estadio {home_name}")
             city = venue.get("address", {}).get("city", cfg["country"])
 
-            # 1. RESOLVER ÁRBITRO OFICIAL ÚNICO Y REAL
-            officials = comp.get("officials", [])
-            api_official = ""
-            if officials and isinstance(officials[0], dict):
-                api_official = officials[0].get("displayName") or officials[0].get("fullName") or ""
-            if not api_official and espn_league_code and espn_event_id and espn_event_id.isdigit():
+            # Motor 3: WeatherStadiumEngine (Estadio real + clima ligero)
+            weather_stadium_res = WeatherStadiumEngine.get_stadium_and_weather(venue_name, city)
+            stadium_data = weather_stadium_res["stadium"]
+            weather_data = weather_stadium_res["weather"]
+
+            # Motor 2: RefereeEngine (Árbitro oficial real o 'Por Definir')
+            sum_cached = None
+            if espn_league_code and espn_event_id and espn_event_id.isdigit():
                 sum_cache_key = (str(espn_league_code), str(espn_event_id))
                 if sum_cache_key in MultiSourceRosterEngine._SUMMARY_CACHE:
                     sum_cached = MultiSourceRosterEngine._SUMMARY_CACHE[sum_cache_key][1]
-                    if isinstance(sum_cached, dict):
-                        g_officials = (sum_cached.get("gameInfo") or {}).get("officials") or []
-                        if g_officials and isinstance(g_officials[0], dict):
-                            api_official = g_officials[0].get("displayName") or g_officials[0].get("fullName") or ""
 
-            league_idx = league_match_counts.get(l_key, 0)
-            league_match_counts[l_key] = league_idx + 1
-
-            ref_stats = RefereeEngine.resolve_official_for_fixture(
-                league_key=espn_league_code or l_key,
-                fixture_id=ev_id,
-                official_from_api=api_official,
-                match_index=league_idx,
-                team_names=f"{home_name} vs {away_name}"
-            )
+            ref_stats = CoreRefereeEngine.get_match_referee(comp, summary_data=sum_cached if isinstance(sum_cached, dict) else None)
 
             # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL (Betano Consensus Engine Multi-Proveedor)
             odds_data = BetanoOddsService.extract_or_calculate_odds(
@@ -1275,16 +1275,17 @@ class RealSportsService:
                   "awayBadge": "green" if not away_bajas else "amber"
                 },
                 "weatherPitch": {
-                  "condition": cfg["default_weather"],
-                  "pitchType": f"Césped {venue_name}",
-                  "surfaceState": "Superficie en óptimas condiciones",
-                  "tacticalImpact": f"Condiciones propicias para ritmo competitivo en {city}."
+                  "condition": weather_data.get("condition", cfg["default_weather"]),
+                  "pitchType": f"{stadium_data.get('name', venue_name)} — {stadium_data.get('grass', 'Césped Reglamentario')} ({stadium_data.get('dimensions', '105x68m')})",
+                  "surfaceState": "Superficie rápida y resbaladiza" if weather_data.get("is_rainy") else "Superficie en óptimas condiciones",
+                  "tacticalImpact": f"Condiciones {'húmedas con balón rápido' if weather_data.get('is_rainy') else 'propicias para ritmo competitivo'} en {city} ({weather_data.get('temp_c', 18)}°C, viento {weather_data.get('wind_kmh', 12)} km/h)."
                 },
                 "referee": {
-                  "name": f"{ref_stats.name} ({cfg['country'][:3].upper()})",
-                  "avgYellows": ref_stats.yellow_cards_avg,
-                  "penaltiesPerMatch": ref_stats.penalties_per_game_avg,
-                  "style": f"{ref_stats.strictness_level} en faltas y cortes tácticos."
+                  "name": "Por Definir" if not ref_stats.assigned else f"{ref_stats.name} ({cfg['country'][:3].upper()})",
+                  "avgYellows": ref_stats.get("yellow_avg", "Sin registro") if not ref_stats.assigned else ref_stats.yellow_cards_avg,
+                  "penaltiesPerMatch": ref_stats.get("penalties_rate", "Sin registro") if not ref_stats.assigned else ref_stats.penalties_per_game_avg,
+                  "style": ref_stats.get("style", "Designación pendiente (Publicación oficial 24-48h antes del encuentro)") if not ref_stats.assigned else f"{ref_stats.strictness_level} en faltas y cortes tácticos.",
+                  "assigned": ref_stats.assigned
                 },
                 "teamStatus": {
                   "home": {
@@ -1336,6 +1337,35 @@ class RealSportsService:
                 "betanoLevel1": [rec_corners, rec_cards, rec_winner, rec_low_risk, rec_goals],
                 "betanoLevel2": []
             }
+
+            # Motor 4: TeamContextEngine (Estado psicológico y anímico de planteles)
+            home_news = ContextNewsScraper().get_team_news(home_name) or []
+            away_news = ContextNewsScraper().get_team_news(away_name) or []
+            home_context = TeamContextEngine.analyze_morale_and_fatigue(home_news, midweek_cup=False)
+            away_context = TeamContextEngine.analyze_morale_and_fatigue(away_news, midweek_cup=False)
+            match_data["teamContext"] = {
+                "home": home_context,
+                "away": away_context
+            }
+
+            # Motor 5: CorrelationBettingEngine (Correlaciones positivas reales)
+            in_form_forwards = [h_sc["name"]] if h_sc.get("name") and h_sc["name"] != "Sin registro" else []
+            if a_sc.get("name") and a_sc["name"] != "Sin registro":
+                in_form_forwards.append(a_sc["name"])
+
+            is_derby = any(k in f"{home_name} {away_name}".lower() for k in ["derbi", "clásico", "clasico", "madrid", "barcelona", "milan", "inter", "arsenal", "tottenham", "chelsea", "betis", "sevilla", "boca", "river", "colo-colo", "universidad de chile"])
+            low_block = bool(a_odd < 1.70 or h_odd < 1.70)
+
+            positive_correlations = CorrelationBettingEngine.build_positive_correlations(
+                weather_stadium=weather_stadium_res,
+                referee=ref_stats,
+                home_bajas=home_bajas,
+                away_bajas=away_bajas,
+                in_form_forwards=in_form_forwards,
+                low_block_match=low_block,
+                is_derby=is_derby
+            )
+            match_data["positiveCorrelations"] = positive_correlations
 
             # Analítica individual avanzada (Anotadores con Herencia + Tarjetas con Cruce Directo)
             is_official = bool(is_live or is_finished)
@@ -1453,6 +1483,7 @@ class RealSportsService:
         cls._cached_matches = processed_matches
         cls._last_fetch = now_santiago
         cls._save_disk_cache(processed_matches)
+        gc.collect()
 
         # Calentar plantillas completas y resúmenes post-partido en hilo daemon sin bloquear la respuesta
         if (bg_summary_targets or bg_roster_targets) and not cls._is_warming_rosters_bg:

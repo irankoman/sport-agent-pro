@@ -666,16 +666,17 @@ class RefereeEngine:
         clean_name = name.replace(" (UCL)", "").strip() if name else ""
         data = REFEREE_DATABASE.get(name) or REFEREE_DATABASE.get(clean_name)
         if not data:
+            is_pending = (clean_name or name) in ("Por Definir", "por definir", "")
             return RefereeStats(
-                name=clean_name or name,
-                matches_officiated=16,
+                name="Por Definir" if is_pending else (clean_name or name),
+                matches_officiated=0 if is_pending else 16,
                 yellow_cards_avg=4.4,
                 red_cards_avg=0.22,
                 fouls_per_game_avg=23.5,
                 penalties_per_game_avg=0.32,
-                strictness_level="Moderado",
+                strictness_level="Designación pendiente (Publicación oficial 24-48h antes del encuentro)" if is_pending else "Moderado",
                 home_bias_fouls_pct=50.0,
-                betano_card_recommendation="Línea estándar Betano (Over/Under 4.5 tarjetas)"
+                betano_card_recommendation="Designación de árbitro pendiente" if is_pending else "Línea estándar Betano (Over/Under 4.5 tarjetas)"
             )
         
         yellow_avg = data["yellow_avg"]
@@ -726,11 +727,5 @@ class RefereeEngine:
                     return cls.get_referee_profile(db_name)
             return cls.get_referee_profile(raw_clean)
         
-        l_norm = league_key.lower().strip()
-        roster = LEAGUE_ROSTERS.get(l_norm)
-        if not roster:
-            prefix = l_norm.split(".")[0]
-            roster = LEAGUE_ROSTERS.get(prefix, LEAGUE_ROSTERS.get("esp.1", ["Michael Oliver"]))
-        
-        assigned_name = roster[match_index % len(roster)]
-        return cls.get_referee_profile(assigned_name)
+        # Regla estricta anti-alucinación: Si no hay árbitro oficial reportado, devolver 'Por Definir'
+        return cls.get_referee_profile("Por Definir")

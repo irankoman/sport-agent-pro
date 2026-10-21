@@ -33,4 +33,5 @@ def get_team_goalkeeper(team_name: str, league_code: str = "", team_id: str = ""
     """
     from backend.services.multi_source_roster_engine import MultiSourceRosterEngine
     gk_info = MultiSourceRosterEngine.get_active_goalkeeper(team_name, league_code=league_code, team_id=team_id)
-    return gk_info.get("name", f"Portero de {team_name}")
+    name = gk_info.get("name")
+    return name if name and name != "Sin registro" else "Sin registro"

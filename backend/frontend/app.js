@@ -751,6 +751,11 @@
       const [savedBets, setSavedBets] = useState(loadSavedBets);
       const [showSavedBetsModal, setShowSavedBetsModal] = useState(false);
       const [saveBetSuccess, setSaveBetSuccess] = useState(false);
+      const toggleSavedBetsView = () => setShowSavedBetsModal((prev) => !prev);
+      useEffect(() => {
+        window.toggleSavedBetsView = () => setShowSavedBetsModal((prev) => !prev);
+        return () => { delete window.toggleSavedBetsView; };
+      }, []);
 
       // Estado de Instalación PWA (Android / iOS)
       const [installPrompt, setInstallPrompt] = useState(null);
@@ -1979,11 +1984,13 @@
                 </button>
 
                 <button
-                  onClick={() => setShowSavedBetsModal(true)}
-                  className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition active:scale-95 shadow"
+                  id="btn-saved-bets-tab"
+                  onClick={() => typeof toggleSavedBetsView === 'function' ? toggleSavedBetsView() : setShowSavedBetsModal((prev) => !prev)}
+                  className="nav-btn px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition active:scale-95 shadow"
+                  style={{ border: "1px solid #f59e0b", color: "#fbbf24", fontWeight: 700 }}
                   title="Ver y administrar apuestas guardadas"
                 >
-                  <span>💼 Apuestas Guardadas ({savedBets.length})</span>
+                  <span>📌 Apuestas Guardadas (<span id="saved-bets-counter">{savedBets.length}</span>)</span>
                 </button>
 
                 <button
@@ -2241,9 +2248,9 @@
                                         {od.isMarketSuspended && (
                                           <span className="text-rose-400 font-extrabold">🔒 Mercado Suspendido (&gt;88&apos;) ·</span>
                                         )}
-                                        <span>⚡ VIVO: 1: @{od.homeWin.toFixed(2)} · X: @{od.draw.toFixed(2)} · 2: @{od.awayWin.toFixed(2)}</span>
+                                        <span>⚡ VIVO: 1: {od.homeWin.toFixed(2)} · X: {od.draw.toFixed(2)} · 2: {od.awayWin.toFixed(2)}</span>
                                         <span className="text-[9px] text-emerald-300 bg-emerald-500/15 px-1 rounded border border-emerald-500/30">({od.providersBadge})</span>
-                                        <span className="text-[9px] text-slate-400 font-normal">(Pre: @{od.preHomeWin.toFixed(2)} / @{od.preAwayWin.toFixed(2)})</span>
+                                        <span className="text-[9px] text-slate-400 font-normal">(Pre: {od.preHomeWin.toFixed(2)} / {od.preAwayWin.toFixed(2)})</span>
                                       </span>
                                     );
                                   }
@@ -2252,7 +2259,7 @@
                                       className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold flex items-center gap-1 flex-wrap"
                                       title={`Consenso Multi-Proveedor Betano: ${(od.providersList || []).join(' + ')}`}
                                     >
-                                      <span>📊</span> 1: @{od.homeWin.toFixed(2)} · X: @{od.draw.toFixed(2)} · 2: @{od.awayWin.toFixed(2)} <span className="text-sky-300 font-extrabold">({od.providersBadge})</span>
+                                      <span>📊</span> 1: {od.homeWin.toFixed(2)} · X: {od.draw.toFixed(2)} · 2: {od.awayWin.toFixed(2)} <span className="text-sky-300 font-extrabold">({od.providersBadge})</span>
                                     </span>
                                   );
                                 })()}
@@ -2463,14 +2470,14 @@
                                   </span>
                                 )}
                                 <span className="text-slate-200 font-bold">
-                                  📊 1: <strong className="text-amber-300">@{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> · 2: <strong className="text-amber-300">@{od.awayWin.toFixed(2)}</strong> <span className="text-emerald-400">({od.providersBadge})</span>
+                                  📊 1: <strong className="text-amber-300">{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">{od.draw.toFixed(2)}</strong> · 2: <strong className="text-amber-300">{od.awayWin.toFixed(2)}</strong> <span className="text-emerald-400">({od.providersBadge})</span>
                                 </span>
                                 <span className="text-[10px] text-slate-400">
-                                  (Pre: @{od.preHomeWin.toFixed(2)} / @{od.preDraw.toFixed(2)} / @{od.preAwayWin.toFixed(2)})
+                                  (Pre: {od.preHomeWin.toFixed(2)} / {od.preDraw.toFixed(2)} / {od.preAwayWin.toFixed(2)})
                                 </span>
                                 <span className="text-slate-500 hidden sm:inline">•</span>
                                 <span className="text-slate-300 hidden sm:inline">
-                                  1X: <strong className="text-sky-300">@{od.dc1X.toFixed(2)}</strong> · X2: <strong className="text-sky-300">@{od.dcX2.toFixed(2)}</strong> · O/U {od.goalsLine}: <strong className="text-emerald-400">@{od.overGoals.toFixed(2)}</strong>
+                                  1X: <strong className="text-sky-300">{od.dc1X.toFixed(2)}</strong> · X2: <strong className="text-sky-300">{od.dcX2.toFixed(2)}</strong> · O/U {od.goalsLine}: <strong className="text-emerald-400">{od.overGoals.toFixed(2)}</strong>
                                 </span>
                               </div>
                             );
@@ -2481,15 +2488,15 @@
                                 className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1 shadow-sm"
                                 title={`Fuentes: ${(od.providersList || []).join(' + ')}`}
                               >
-                                <span>📊</span> 1: <strong className="text-orange-400">@{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">@{od.draw.toFixed(2)}</strong> · 2: <strong className="text-orange-400">@{od.awayWin.toFixed(2)}</strong> <span className="text-sky-300 font-extrabold">({od.providersBadge})</span>
+                                <span>📊</span> 1: <strong className="text-orange-400">{od.homeWin.toFixed(2)}</strong> · X: <strong className="text-slate-200">{od.draw.toFixed(2)}</strong> · 2: <strong className="text-orange-400">{od.awayWin.toFixed(2)}</strong> <span className="text-sky-300 font-extrabold">({od.providersBadge})</span>
                               </span>
                               <span className="text-slate-500 hidden sm:inline">•</span>
                               <span className="text-slate-300 hidden sm:inline">
-                                🛡️ 1X: <strong className="text-sky-300">@{od.dc1X.toFixed(2)}</strong> · X2: <strong className="text-sky-300">@{od.dcX2.toFixed(2)}</strong> · DNB: <strong className="text-amber-300">@{od.dnbHome.toFixed(2)}/@{od.dnbAway.toFixed(2)}</strong>
+                                🛡️ 1X: <strong className="text-sky-300">{od.dc1X.toFixed(2)}</strong> · X2: <strong className="text-sky-300">{od.dcX2.toFixed(2)}</strong> · DNB: <strong className="text-amber-300">{od.dnbHome.toFixed(2)}/{od.dnbAway.toFixed(2)}</strong>
                               </span>
                               <span className="text-slate-500 hidden sm:inline">•</span>
                               <span className="text-slate-300 hidden sm:inline">
-                                O/U {od.goalsLine}: <strong className="text-emerald-400">@{od.overGoals.toFixed(2)}</strong>
+                                O/U {od.goalsLine}: <strong className="text-emerald-400">{od.overGoals.toFixed(2)}</strong>
                               </span>
                             </div>
                           );
@@ -3171,7 +3178,7 @@
 
                                     <div className="flex items-center gap-3">
                                       <span className="text-base font-black text-orange-400 font-mono">
-                                        @{shotsAnalytics.weatherLink.goalkeeperSaves.odds.toFixed(2)}
+                                        {shotsAnalytics.weatherLink.goalkeeperSaves.odds.toFixed(2)}
                                       </span>
                                       <button
                                         onClick={() => togglePickInSlip({
@@ -3482,7 +3489,7 @@
 
                                     <div className="flex items-center gap-3">
                                       <span className="text-base font-black text-orange-400 font-mono">
-                                        @{h2hAndCards.mostCardsPrediction.odds.toFixed(2)}
+                                        {h2hAndCards.mostCardsPrediction.odds.toFixed(2)}
                                       </span>
                                       <button
                                         onClick={() => togglePickInSlip({
@@ -3873,7 +3880,7 @@
                                                 </div>
                                                 <div className="flex items-center gap-1.5 shrink-0">
                                                   <span className="text-xs font-black text-orange-400 font-mono">
-                                                    @{(sc.goalOrAssist.odds || 1.65).toFixed(2)}
+                                                    {(sc.goalOrAssist.odds || 1.65).toFixed(2)}
                                                   </span>
                                                   <button
                                                     onClick={() => togglePickInSlip(gaItem)}
@@ -4276,7 +4283,7 @@
                                             {comb.badge}
                                           </span>
                                           <span className="text-base font-black text-orange-400 font-mono">
-                                            @{comb.combinedOdds.toFixed(2)}
+                                            {comb.combinedOdds.toFixed(2)}
                                           </span>
                                         </div>
 
@@ -4292,7 +4299,7 @@
                                                 <span className="font-bold text-white block text-[11px]">{pk.market}</span>
                                               </div>
                                               <span className="font-mono text-orange-300 font-black text-xs shrink-0">
-                                                @{pk.odds.toFixed(2)}
+                                                {pk.odds.toFixed(2)}
                                               </span>
                                             </div>
                                           ))}

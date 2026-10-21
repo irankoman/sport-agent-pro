@@ -73,9 +73,9 @@ class PlayerPropsEngine:
         # ---------------------------------------------------------------------
         # 1. ANOTADORES CALIBRADOS MATEMÁTICAMENTE DESDE UNIFIED ODDS (Poisson + Margen Betano 7.5%)
         # ---------------------------------------------------------------------
-        sc1_raw = home_avail_scorers[0] if home_avail_scorers else {"name": f"Delantero de {home_name}", "role": "Pateador N°1", "fit": 97}
-        sc2_raw = home_avail_scorers[1] if len(home_avail_scorers) > 1 else (home_avail_scorers[0] if home_avail_scorers else {"name": f"Extremo de {home_name}", "role": "Segundo Atacante", "fit": 95})
-        sc3_raw = away_avail_scorers[0] if away_avail_scorers else {"name": f"Atacante de {away_name}", "role": "Referente Visitante", "fit": 94}
+        sc1_raw = home_avail_scorers[0] if home_avail_scorers else {"name": "Sin registro", "role": "Pateador N°1", "fit": 97}
+        sc2_raw = home_avail_scorers[1] if len(home_avail_scorers) > 1 else (home_avail_scorers[0] if home_avail_scorers else {"name": "Sin registro", "role": "Segundo Atacante", "fit": 95})
+        sc3_raw = away_avail_scorers[0] if away_avail_scorers else {"name": "Sin registro", "role": "Referente Visitante", "fit": 94}
 
         # Calcular cuotas de goleadores en tiempo real escaladas por lambda_home y lambda_away de unifiedOdds
         sc1_odds, sc1_prob, sc1_xg = BetanoOddsService.calculate_player_scorer_odds(
@@ -207,7 +207,7 @@ class PlayerPropsEngine:
             "rivalDefenseDetail": h_matchup_detail,
             "goalOrAssist": sc2_ga,
             "fit": sc2_raw.get("fit", 95),
-            "role": sc2_raw.get("role", f"Segundo Atacante de {home_name}"),
+            "role": sc2_raw.get("role", "Segundo Atacante"),
             "starter": True,
             "isStarter": True,
             "isOfficialStarter": home_has_lineup,
@@ -362,10 +362,10 @@ class PlayerPropsEngine:
         # ---------------------------------------------------------------------
         # 4. TARJETAS AMARILLAS Y FALTAS COMETIDAS (+1.5 FALTAS)
         # ---------------------------------------------------------------------
-        card1_raw = home_avail_cards[0] if home_avail_cards else {"name": f"Zaguero de {home_name}", "role": "Defensa Central", "fit": 94}
-        card2_raw = away_avail_cards[0] if away_avail_cards else {"name": f"Zaguero de {away_name}", "role": "Defensa Central", "fit": 91}
-        card3_raw = home_avail_cards[1] if len(home_avail_cards) > 1 else (home_avail_cards[0] if home_avail_cards else {"name": f"Lateral de {home_name}", "role": "Marcador de Banda", "fit": 92})
-        away_playmaker = away_avail_scorers[1]["name"] if len(away_avail_scorers) > 1 else (away_avail_scorers[0]["name"] if away_avail_scorers else f"Organizador de {away_name}")
+        card1_raw = home_avail_cards[0] if home_avail_cards else {"name": "Sin registro", "role": "Defensa Central", "fit": 94}
+        card2_raw = away_avail_cards[0] if away_avail_cards else {"name": "Sin registro", "role": "Defensa Central", "fit": 91}
+        card3_raw = home_avail_cards[1] if len(home_avail_cards) > 1 else (home_avail_cards[0] if home_avail_cards else {"name": "Sin registro", "role": "Marcador de Banda", "fit": 92})
+        away_playmaker = away_avail_scorers[1]["name"] if len(away_avail_scorers) > 1 else (away_avail_scorers[0]["name"] if away_avail_scorers else "Sin registro")
 
         is_h_underdog = (home_win_odds > away_win_odds)
         is_a_underdog = (away_win_odds > home_win_odds)
