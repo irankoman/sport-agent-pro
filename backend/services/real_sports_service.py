@@ -1089,7 +1089,14 @@ class RealSportsService:
                 if sum_cache_key in MultiSourceRosterEngine._SUMMARY_CACHE:
                     sum_cached = MultiSourceRosterEngine._SUMMARY_CACHE[sum_cache_key][1]
 
-            ref_stats = CoreRefereeEngine.get_match_referee(comp, summary_data=sum_cached if isinstance(sum_cached, dict) else None)
+            ref_stats = CoreRefereeEngine.get_match_referee(
+                comp,
+                summary_data=sum_cached if isinstance(sum_cached, dict) else None,
+                home_team=home_name,
+                away_team=away_name,
+                league_code=espn_league_code,
+                event_id=espn_event_id
+            )
 
             # 2. RESOLVER CUOTAS DINÁMICAS BETANO EN TIEMPO REAL (Betano Consensus Engine Multi-Proveedor)
             odds_data = BetanoOddsService.extract_or_calculate_odds(

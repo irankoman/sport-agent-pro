@@ -25,7 +25,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 import requests
 from requests.adapters import HTTPAdapter
 from backend.services.context_news_scraper import ContextNewsScraper
-from backend.services.core_5_engines import PlayerEngine
+from backend.services.core_5_engines import PlayerEngine, TripleSourceConnector
 
 logger = logging.getLogger(__name__)
 
@@ -727,12 +727,21 @@ class MultiSourceRosterEngine:
         except Exception as e:
             logger.debug(f"Aviso: No se pudo obtener noticias complementarias para {team_name}: {e}")
 
+        # Conector de 3 Fuentes: SofaScore missingPlayers + Transfermarkt + FotMob
+        sofa_bajas = []
+        try:
+            sofa_match = TripleSourceConnector.fetch_sofascore_match_data(team_name, "")
+            sofa_bajas = sofa_match.get("missing_home", []) + sofa_match.get("missing_away", [])
+        except Exception:
+            pass
+
         # Motor 1: PlayerEngine (Bajas médicas y disciplinares reales con regla anti-alucinación)
         clean_roster, bajas, unavail_set = PlayerEngine.build_roster_and_medical(
             team_name=team_name,
             league_code=l_code,
             team_id=t_id,
             raw_athletes=raw_athletes,
+            fotmob_unavailable=sofa_bajas,
             props_data=props_data,
             news_titles=news_items
         )
