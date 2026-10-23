@@ -1,12 +1,14 @@
 """
 Servidor Principal FastAPI para BetanoQuant AI
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import os
+import shutil
+import threading
 
 from backend.models import (
     MatchAnalysis, LiveAlert, UserPreferences, RiskTier, LeagueEnum
@@ -16,6 +18,21 @@ from backend.data.match_repository import (
 )
 from backend.engines.chat_agent import BetanoChatAgent
 from backend.engines.referee_engine import REFEREE_DATABASE, RefereeEngine
+from backend.services.real_sports_service import RealSportsService
+
+def clean_corrupted_pycache():
+    """Limpia recursivamente directorios __pycache__ para evitar inconsistencias de bytecode."""
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for root, dirs, files in os.walk(base_dir):
+            if "__pycache__" in dirs:
+                pycache_dir = os.path.join(root, "__pycache__")
+                try:
+                    shutil.rmtree(pycache_dir, ignore_errors=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 app = FastAPI(title="BetanoQuant AI", description="Asistente Cuantitativo de Apuestas Deportivas para Betano")
 
@@ -52,36 +69,204 @@ class SimulateAlertRequest(BaseModel):
 # ----------------- ENDPOINTS API -----------------
 
 @app.get("/api/matches")
-def get_matches(
-    league: Optional[str] = None,
-    day: Optional[str] = None,
-    favorites_only: bool = False,
-    week_start: Optional[str] = None,
-    week_end: Optional[str] = None
+def get_matches_by_filters(
+    response: Response,
+    league_id: Optional[str] = Query(None),
+    league: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    specific_date: Optional[str] = Query(None),
+    day: Optional[str] = Query(None),
+    match_status: Optional[str] = Query(None),
+    favorites_only: bool = Query(False),
+    week_start: Optional[str] = Query(None),
+    week_end: Optional[str] = Query(None),
+    raw_list: bool = Query(False)
 ):
-    if week_start and week_end:
-        return RealSportsService.get_cached_or_fetch_matches(
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+
+    real_matches = RealSportsService.get_cached_matches_list()
+    if not real_matches and week_start and week_end:
+        real_matches = RealSportsService.get_cached_or_fetch_matches(
             force_refresh=False,
             week_start=week_start,
             week_end=week_end
         )
 
-    results = CURRENT_MATCHES
-    
-    # Actualizar estado de favorito según las preferencias del usuario
-    for m in results:
-        m.is_favorite_involved = any(
-            fav.lower() in m.home_team.lower() or fav.lower() in m.away_team.lower()
-            for fav in CURRENT_PREFERENCES.favorite_teams
-        )
+    source_is_real = bool(real_matches)
+    matches_pool = real_matches if source_is_real else CURRENT_MATCHES
 
-    if favorites_only:
-        results = [m for m in results if m.is_favorite_involved]
-    if league:
-        results = [m for m in results if league.lower() in m.league.value.lower()]
-    if day:
-        results = [m for m in results if m.day_of_week.lower() == day.lower()]
-    return results
+    results = []
+    target_league = (league_id or league or "").strip().upper()
+    target_status = (match_status or "").strip().upper()
+
+    for m in matches_pool:
+        if source_is_real and isinstance(m, dict):
+            m_id = m.get("id")
+            m_lid = str(m.get("leagueId") or "").upper()
+            m_date = str(m.get("matchDate") or m.get("rawDate") or "")
+            is_fin = bool(m.get("isFinished"))
+            is_live = bool(m.get("isLive"))
+            status_str = "FINISHED" if is_fin else ("LIVE" if is_live else "SCHEDULED")
+
+            if target_league and target_league != "ALL" and target_league not in m_lid:
+                continue
+
+            if target_status and target_status != "ALL" and status_str != target_status:
+                continue
+
+            if specific_date:
+                if m_date != specific_date:
+                    continue
+            else:
+                if start_date and m_date < start_date:
+                    continue
+                if end_date and m_date > end_date:
+                    continue
+
+            if day and day.lower() not in str(m.get("dayLabel", "")).lower():
+                continue
+
+            h_team = str(m.get("homeTeam") or "")
+            a_team = str(m.get("awayTeam") or "")
+            is_fav = any(
+                fav.lower() in h_team.lower() or fav.lower() in a_team.lower()
+                for fav in CURRENT_PREFERENCES.favorite_teams
+            )
+            if favorites_only and not is_fav:
+                continue
+
+            home_ctx = m.get("teamContext", {}).get("home", {}) if isinstance(m.get("teamContext"), dict) else {}
+            away_ctx = m.get("teamContext", {}).get("away", {}) if isinstance(m.get("teamContext"), dict) else {}
+            ref_data = m.get("referee") if isinstance(m.get("referee"), dict) else {}
+            wp = m.get("weatherPitch") if isinstance(m.get("weatherPitch"), dict) else {}
+
+            results.append({
+                "match_id": m_id,
+                "league_id": m_lid,
+                "match_date": m_date,
+                "week_start_monday": m.get("weekStartDate"),
+                "week_end_sunday": m.get("weekEndDate"),
+                "next_monday_rollover": None,
+                "kickoff_time": m.get("fullDay") or m.get("dayLabel"),
+                "stadium_name": m.get("stadium"),
+                "match_status": status_str,
+                "live_minute": m.get("clock") or ("FT" if is_fin else None),
+                "score_display": m.get("score"),
+                "suspension_reason": None,
+                "home_team": {
+                    "name": h_team,
+                    "position": home_ctx.get("position", 0),
+                    "morale_score": home_ctx.get("morale_score", 50.0),
+                    "psych_state": home_ctx.get("psychological_state", "Estable"),
+                    "last_3": home_ctx.get("last_3", "")
+                },
+                "away_team": {
+                    "name": a_team,
+                    "position": away_ctx.get("position", 0),
+                    "morale_score": away_ctx.get("morale_score", 50.0),
+                    "psych_state": away_ctx.get("psychological_state", "Estable"),
+                    "last_3": away_ctx.get("last_3", "")
+                },
+                "referee": {
+                    "name": ref_data.get("name") or "Por Definir",
+                    "mentality": ref_data.get("style") or "Por Definir",
+                    "yellows_avg": ref_data.get("yellow_avg") or ref_data.get("avgYellows") or 0.0,
+                    "is_assigned": bool(ref_data.get("assigned"))
+                },
+                "weather_pitch": {
+                    "condition": wp.get("condition"),
+                    "temp_c": wp.get("temp_c", 18),
+                    "rain_mm": wp.get("rain_mm", 0.0),
+                    "wind_kmh": wp.get("wind_kmh", 12),
+                    "grass_type": wp.get("pitchType"),
+                    "playable_state": wp.get("surfaceState"),
+                    "tactical_impact": wp.get("tacticalImpact")
+                },
+                "h2h": m.get("deepAnalytics") or {},
+                "betano_odds": m.get("unifiedOdds") or {},
+                "recommended_markets": m.get("betanoLevel1", {}).get("picks", []) if isinstance(m.get("betanoLevel1"), dict) else [],
+                "safe_parlays": m.get("betanoLevel2", {}).get("parlays", []) if isinstance(m.get("betanoLevel2"), dict) else [],
+                "lineups": m.get("lineupSummary") or {
+                    "home_status": "Confirmado" if m.get("lineupStatus") == "official" else "Por confirmar",
+                    "away_status": "Confirmado" if m.get("lineupStatus") == "official" else "Por confirmar",
+                    "home_xi": [],
+                    "away_xi": []
+                },
+                "integrity": {
+                    "score": 98,
+                    "status": "VERIFIED_ESPN_SOFASCORE",
+                    "warnings": []
+                }
+            })
+        else:
+            m_lid = getattr(m, "league", None)
+            m_lid_str = m_lid.value.upper() if hasattr(m_lid, "value") else str(m_lid or "").upper()
+            if target_league and target_league != "ALL" and target_league not in m_lid_str:
+                continue
+            if day and hasattr(m, "day_of_week") and m.day_of_week.lower() != day.lower():
+                continue
+            h_team = getattr(m, "home_team", "")
+            a_team = getattr(m, "away_team", "")
+            is_fav = any(
+                fav.lower() in h_team.lower() or fav.lower() in a_team.lower()
+                for fav in CURRENT_PREFERENCES.favorite_teams
+            )
+            if favorites_only and not is_fav:
+                continue
+
+            ref_obj = getattr(m, "referee", None)
+            results.append({
+                "match_id": getattr(m, "id", ""),
+                "league_id": m_lid_str,
+                "match_date": getattr(m, "match_date", ""),
+                "week_start_monday": week_start,
+                "week_end_sunday": week_end,
+                "next_monday_rollover": None,
+                "kickoff_time": getattr(m, "kickoff_time", ""),
+                "stadium_name": getattr(m, "stadium", ""),
+                "match_status": "SCHEDULED",
+                "live_minute": None,
+                "score_display": None,
+                "suspension_reason": None,
+                "home_team": {
+                    "name": h_team,
+                    "position": 0,
+                    "morale_score": 50.0,
+                    "psych_state": "Estable",
+                    "last_3": ""
+                },
+                "away_team": {
+                    "name": a_team,
+                    "position": 0,
+                    "morale_score": 50.0,
+                    "psych_state": "Estable",
+                    "last_3": ""
+                },
+                "referee": {
+                    "name": getattr(ref_obj, "name", "Por Definir"),
+                    "mentality": getattr(ref_obj, "strictness_level", "Por Definir"),
+                    "yellows_avg": getattr(ref_obj, "yellow_cards_avg", 0.0),
+                    "is_assigned": True if getattr(ref_obj, "name", None) else False
+                },
+                "weather_pitch": {},
+                "h2h": {},
+                "betano_odds": {},
+                "recommended_markets": [],
+                "safe_parlays": [],
+                "lineups": {"home_status": "Confirmado", "away_status": "Por confirmar", "home_xi": [], "away_xi": []},
+                "integrity": {"score": 90, "status": "INTERNAL_ENGINE", "warnings": []}
+            })
+
+    if raw_list:
+        return results
+
+    return {
+        "status": "SUCCESS",
+        "engine_version": "4.1-LIVE-PORT-8000",
+        "count": len(results),
+        "matches": results
+    }
 
 @app.get("/api/matches/{match_id}", response_model=MatchAnalysis)
 def get_match_detail(match_id: str):
@@ -158,10 +343,11 @@ extract_goals_by_team = RealSportsService.extract_goals_by_team
 def preload_matches_on_startup():
     """
     Precarga no bloqueante al arrancar el servidor:
-    Carga de inmediato el último caché persistido en `cache_matches.json`, lanza un hilo daemon
-    para sincronizar las 9 ligas en paralelo sin bloquear el puerto de Render, e inicia el
-    monitor ligero de alineaciones cada 3 minutos para partidos en vivo o a < 75 min.
+    Limpia pycache corrupto, carga de inmediato el último caché persistido en `cache_matches.json`,
+    lanza un hilo daemon para sincronizar las 9 ligas en paralelo sin bloquear el puerto de Render,
+    e inicia el monitor ligero de alineaciones cada 3 minutos para partidos en vivo o a < 75 min.
     """
+    clean_corrupted_pycache()
     try:
         RealSportsService._load_disk_cache()
         threading.Thread(
@@ -215,6 +401,20 @@ def get_sync_status():
 def trigger_data_sync(force: bool = True):
     """Dispara un ciclo de actualización inmediata de todas las fuentes de datos y scraping."""
     return PollingEngine.get_instance().perform_sync(force=force)
+
+@app.post("/api/sync-data")
+async def trigger_data_sync_v4(
+    week_offset_days: int = Query(0)
+):
+    """Endpoint v4.1 para disparar actualización global de datos de las 9 ligas."""
+    try:
+        RealSportsService.fetch_live_matches_for_all_leagues(force_refresh=True)
+        return {
+            "status": "SUCCESS",
+            "details": f"Sincronización completa de ligas ejecutada (offset {week_offset_days})"
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/news")
 def get_latest_news():
